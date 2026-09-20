@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { useCallback, useEffect, useState } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
+import NewCampaignMenu from "@/components/new-campaign-menu";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import { readCache, writeCache } from "@/lib/client-cache";
 
@@ -304,12 +305,7 @@ export default function CampaignsPage() {
           >
             {t("Import")}
           </Link>
-          <Link
-            href="/campaigns/new"
-            className="flex-1 rounded bg-accent px-4 py-2 text-center text-sm font-medium text-white hover:bg-accent-hover sm:flex-none"
-          >
-            {t("New Campaign")}
-          </Link>
+          <NewCampaignMenu />
         </div>
       </div>
 
@@ -348,12 +344,7 @@ export default function CampaignsPage() {
           <p className="text-sm text-muted mb-6 max-w-sm mx-auto">
             {t("Create your first comment-to-DM campaign to turn a post or reel into a measurable conversation flow.")}
           </p>
-          <Link
-            href="/campaigns/new"
-            className="inline-flex items-center gap-2 px-5 py-2.5 rounded bg-accent text-sm font-semibold text-white hover:bg-accent-hover transition-colors"
-          >
-            {t("Create Campaign")}
-          </Link>
+          <NewCampaignMenu centered />
         </div>
       )}
 

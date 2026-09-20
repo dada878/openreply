@@ -6,6 +6,28 @@ import {
   getCurrentWorkspaceContext,
 } from "@/lib/workspace-access";
 
+export async function GET() {
+  const context = await getCurrentWorkspaceContext();
+  if (!context) {
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  }
+  // One extra row tells the creation menu whether to offer the full library.
+  const templates = await prisma.campaignTemplate.findMany({
+    where: { workspaceId: context.workspaceId },
+    orderBy: [{ updatedAt: "desc" }, { id: "desc" }],
+    select: { id: true, name: true },
+    take: 6,
+  });
+  return NextResponse.json({
+    success: true,
+    data: templates.slice(0, 5),
+    hasMore: templates.length > 5,
+  });
+}
+
 async function mutate(request: NextRequest, method: "POST" | "PUT" | "DELETE") {
   const context = await getCurrentWorkspaceContext();
   if (!context) {

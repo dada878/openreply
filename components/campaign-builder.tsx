@@ -59,6 +59,7 @@ interface CampaignBuilderProps {
   mode: "new" | "edit" | "template";
   template?: SavedCampaignTemplate;
   campaignId?: string;
+  allowImportQueue?: boolean;
 }
 
 function Section({
@@ -139,6 +140,7 @@ export default function CampaignBuilder({
   mode,
   campaignId,
   template,
+  allowImportQueue = false,
 }: CampaignBuilderProps) {
   const { t } = useI18n();
   const router = useRouter();
@@ -362,7 +364,7 @@ export default function CampaignBuilder({
   // Pick up a staged CSV import (new mode only) and prefill the first row.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (mode !== "new" || template) return;
+    if (mode !== "new" || template || !allowImportQueue) return;
     try {
       const raw = window.localStorage.getItem(IMPORT_QUEUE_KEY);
       const acct = window.localStorage.getItem(IMPORT_ACCOUNT_KEY);
@@ -376,7 +378,7 @@ export default function CampaignBuilder({
     } catch {
       // ignore a malformed queue
     }
-  }, [mode, template]);
+  }, [mode, template, allowImportQueue]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const username =
@@ -624,7 +626,7 @@ export default function CampaignBuilder({
       {mode === "template" ? (
         <p className="rounded border border-border p-4 text-sm text-muted">{t("Edit the reusable flow here. Choose the account and post when you use it in a campaign.")} {t("Changes to this template do not affect existing campaigns.")}</p>
       ) : template ? (
-        <p className="rounded border border-accent/30 bg-accent/5 p-4 text-sm">{t("Using template: {name}", { name: template.name })} {t("Review the account, post, keywords and links before going live.")}</p>
+        <p className="rounded border border-accent/30 bg-accent/5 p-4 text-sm">{t("Initial settings from template: {name}", { name: template.name })} {t("Review the account, post, keywords and links before going live.")}</p>
       ) : null}
       {importQueue && (
         <div className="rounded border border-accent/30 bg-accent/5 px-4 py-3 text-sm">

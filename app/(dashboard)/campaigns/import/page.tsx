@@ -81,7 +81,7 @@ export default function ImportCampaignsPage() {
       setError(t("Could not stage the import in this browser."));
       return;
     }
-    router.push("/campaigns/new");
+    router.push("/campaigns/new?import=csv");
   }
 
   return (

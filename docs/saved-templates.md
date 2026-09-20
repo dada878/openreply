@@ -10,10 +10,17 @@ from the public, built-in examples at `/templates`.
    form values, including unsaved edits; it does not change the campaign.
 2. Name the template and save it. No connected Instagram account or selected post
    is needed to create a template.
-3. Choose **Use template**. Review the account, choose a post if using a specific
-   post trigger, and adjust keywords, messages and destination URLs.
+3. Click **New Campaign** to open the creation menu. Choose **Blank campaign**
+   or a template directly from the list. The five most recently updated templates
+   appear here; **View all** opens the library only when there are more than five.
+   Choosing a template copies its initial settings into a new campaign. There is
+   no template switcher in the campaign editor and no ongoing template binding.
+   Review the account, choose a post if needed, and adjust the campaign's settings.
 4. Choose **Save paused** to prepare the campaign, or **Go Live** to activate it.
    Merely opening a template does not create or activate a campaign.
+
+CSV imports use `/campaigns/new?import=csv`, so a leftover import queue cannot
+replace a blank campaign or a chosen template.
 
 The library supports searching by name, editing (including renaming), and
 deleting with confirmation. Workspace members can view templates; owners and

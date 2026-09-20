@@ -6,10 +6,20 @@ import { getCurrentWorkspaceContext } from "@/lib/workspace-access";
 export default async function NewCampaignPage({
   searchParams,
 }: {
-  searchParams: Promise<{ savedTemplate?: string | string[] }>;
+  searchParams: Promise<{
+    savedTemplate?: string | string[];
+    import?: string | string[];
+  }>;
 }) {
-  const { savedTemplate } = await searchParams;
-  if (!savedTemplate) return <CampaignBuilder mode="new" />;
+  const { savedTemplate, import: importSource } = await searchParams;
+  if (!savedTemplate)
+    return (
+      <CampaignBuilder
+        key={importSource === "csv" ? "csv" : "blank"}
+        mode="new"
+        allowImportQueue={importSource === "csv"}
+      />
+    );
   if (typeof savedTemplate !== "string") notFound();
   const context = await getCurrentWorkspaceContext();
   if (!context) notFound();

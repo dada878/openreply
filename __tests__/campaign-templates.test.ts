@@ -121,7 +121,7 @@ vi.mock("@/lib/workspace-access", () => ({
         }
       : null,
 }));
-import { POST, PUT, DELETE } from "../app/api/campaign-templates/route";
+import { GET, POST, PUT, DELETE } from "../app/api/campaign-templates/route";
 import { POST as createCampaign } from "../app/api/automations/route";
 
 function request(method: string, body?: unknown, id?: string) {
@@ -141,6 +141,10 @@ beforeEach(() => {
 });
 
 describe("template access control", () => {
+  it("requires login to list creation options", async () => {
+    state.authenticated = false;
+    expect((await GET()).status).toBe(401);
+  });
   it.each([POST, PUT, DELETE])(
     "requires login before touching storage",
     async (handler) => {
@@ -238,6 +242,50 @@ describe.skipIf(!DATABASE_URL)("templates on Postgres", () => {
     expect(response.status).toBe(201);
     return (await response.json()).data.id as string;
   }
+
+  it("lists only this workspace's five newest template names, with overflow only above five", async () => {
+    state.role = "MEMBER";
+    const rows = Array.from({ length: 6 }, (_, index) => ({
+      ...template,
+      id: `option_${index}`,
+      name: `Option ${index}`,
+      workspaceId: "workspace_test",
+      updatedAt: new Date(2026, 0, index + 1),
+    }));
+    const other = await state.db.campaignTemplate.create({
+      data: { ...template, workspaceId: "workspace_other" },
+    });
+    try {
+      expect(await (await GET()).json()).toEqual({
+        success: true,
+        data: [],
+        hasMore: false,
+      });
+      await state.db.campaignTemplate.createMany({ data: rows.slice(0, 5) });
+      const expected = rows
+        .slice(0, 5)
+        .reverse()
+        .map(({ id, name }) => ({ id, name }));
+      expect(await (await GET()).json()).toEqual({
+        success: true,
+        data: expected,
+        hasMore: false,
+      });
+      await state.db.campaignTemplate.create({ data: rows[5] });
+      expect(await (await GET()).json()).toEqual({
+        success: true,
+        data: rows
+          .slice(1)
+          .reverse()
+          .map(({ id, name }) => ({ id, name })),
+        hasMore: true,
+      });
+    } finally {
+      await state.db.campaignTemplate.deleteMany({
+        where: { id: { in: [...rows.map(({ id }) => id), other.id] } },
+      });
+    }
+  });
 
   it("persists the complete flow under the authenticated workspace, without an Instagram binding", async () => {
     state.role = "ADMIN";

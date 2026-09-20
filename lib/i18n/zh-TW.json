@@ -472,6 +472,10 @@
   "Delete this template? Campaigns already created from it will keep their settings.": "確定刪除這個範本？已套用此範本的活動會保留原有設定。",
   "Edit the reusable flow here. Choose the account and post when you use it in a campaign.": "在這裡設定可重複使用的回覆流程，套用到活動時再選擇帳號與貼文。",
   "Changes to this template do not affect existing campaigns.": "修改範本不會影響已建立的活動。",
-  "Using template: {name}": "正在套用範本：{name}。",
-  "Review the account, post, keywords and links before going live.": "啟用前請確認帳號、貼文、關鍵字與連結。"
+  "Initial settings from template: {name}": "初始設定來自範本：{name}。",
+  "Review the account, post, keywords and links before going live.": "啟用前請確認帳號、貼文、關鍵字與連結。",
+  "Blank campaign": "空白活動",
+  "View all": "查看全部",
+  "Could not load templates.": "無法載入範本。",
+  "Try again": "重試"
 }
