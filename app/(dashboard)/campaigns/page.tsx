@@ -297,6 +297,7 @@ export default function CampaignsPage() {
               onChange={handleAccountChange}
             />
           )}
+          <Link href="/campaign-templates" className="rounded border border-border px-4 py-2 text-sm font-medium text-muted hover:text-foreground">{t("My templates")}</Link>
           <Link
             href="/campaigns/import"
             className="flex-1 rounded border border-border px-4 py-2 text-center text-sm font-medium text-muted hover:text-foreground sm:flex-none"

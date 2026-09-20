@@ -1,17 +1,14 @@
 "use client";
 
-/**
- * Campaign Builder
- *
- * Two-pane campaign editor: a control panel on the left and a live phone
- * preview on the right. Used for both creating and editing a campaign.
- *
- * Turn 1 wires the fully-functional pieces: trigger scope (specific / any /
- * next post), match mode (specific words / any word), the opening + reveal DM
- * text, public reply, and the tracked link. Button-driven delivery and the
- * follow / email / follow-up steps arrive in later turns.
- */
+/** Shared campaign/template editor with a live preview. */
 
+import Link from "next/link";
+import SaveTemplate from "@/components/save-template";
+import {
+  campaignTemplateSchema,
+  type SavedCampaignTemplate,
+  type TemplateConfig,
+} from "@/lib/templates/saved-schema";
 import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
@@ -38,6 +35,7 @@ interface LoadedCampaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  wholeWordMatch: boolean;
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -58,7 +56,8 @@ interface LoadedCampaign {
 }
 
 interface CampaignBuilderProps {
-  mode: "new" | "edit";
+  mode: "new" | "edit" | "template";
+  template?: SavedCampaignTemplate;
   campaignId?: string;
 }
 
@@ -89,6 +88,7 @@ function Radio({
   return (
     <button
       type="button"
+      aria-pressed={checked}
       onClick={onSelect}
       className={`flex w-full items-center gap-3 rounded-lg border px-3 py-2.5 text-left text-sm transition-colors ${
         checked ? "border-accent bg-accent/5" : "border-border hover:border-border-hover"
@@ -107,15 +107,20 @@ function Radio({
 }
 
 function Toggle({
+  label,
   on,
   onToggle,
 }: {
+  label: string;
   on: boolean;
   onToggle: () => void;
 }) {
   return (
     <button
       type="button"
+      role="switch"
+      aria-label={label}
+      aria-checked={on}
       onClick={onToggle}
       className={`relative h-6 w-11 shrink-0 rounded-full transition-colors ${
         on ? "bg-accent" : "bg-zinc-300"
@@ -130,23 +135,28 @@ function Toggle({
   );
 }
 
-export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderProps) {
+export default function CampaignBuilder({
+  mode,
+  campaignId,
+  template,
+}: CampaignBuilderProps) {
   const { t } = useI18n();
   const router = useRouter();
+  const initial = template?.config;
 
   const [loading, setLoading] = useState(mode === "edit");
   const [notFound, setNotFound] = useState(false);
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  const [name, setName] = useState("");
+  const [name, setName] = useState(template?.name ?? "");
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
 
-  const [triggerScope, setTriggerScope] = useState<TriggerScope>("specific");
+  const [triggerScope, setTriggerScope] = useState<TriggerScope>(initial?.triggerScope ?? "specific");
   const [postId, setPostId] = useState<string | null>(null);
   const [postUrl, setPostUrl] = useState<string | null>(null);
   const [postThumb, setPostThumb] = useState<string | null>(null);
@@ -157,31 +167,32 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   // the campaign name using it (for the tooltip).
   const [usedPosts, setUsedPosts] = useState<Record<string, string>>({});
 
-  const [matchMode, setMatchMode] = useState<MatchMode>("specific");
-  const [keywordText, setKeywordText] = useState("");
-  const [dmTriggerEnabled, setDmTriggerEnabled] = useState(false);
+  const [matchMode, setMatchMode] = useState<MatchMode>(initial?.matchAnyWord ? "any" : "specific");
+  const [keywordText, setKeywordText] = useState(initial?.keywords.join(", ") ?? "");
+  const [wholeWordMatch, setWholeWordMatch] = useState(initial?.wholeWordMatch ?? true);
+  const [dmTriggerEnabled, setDmTriggerEnabled] = useState(initial?.dmTriggerEnabled ?? false);
 
-  const [publicReplyEnabled, setPublicReplyEnabled] = useState(false);
-  const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>([""]);
+  const [publicReplyEnabled, setPublicReplyEnabled] = useState(initial?.publicReplyEnabled ?? false);
+  const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>(initial?.publicReplyMessages.length ? initial.publicReplyMessages : [""]);
 
-  const [openingDmEnabled, setOpeningDmEnabled] = useState(false);
-  const [openingDmMessage, setOpeningDmMessage] = useState("");
-  const [openingDmButtonLabel, setOpeningDmButtonLabel] = useState("");
+  const [openingDmEnabled, setOpeningDmEnabled] = useState(initial?.openingDmEnabled ?? false);
+  const [openingDmMessage, setOpeningDmMessage] = useState(initial?.openingDmMessage ?? "");
+  const [openingDmButtonLabel, setOpeningDmButtonLabel] = useState(initial?.openingDmButtonLabel ?? "");
 
-  const [dmMessage, setDmMessage] = useState("");
-  const [linkOpen, setLinkOpen] = useState(false);
-  const [trackedDestinationUrl, setTrackedDestinationUrl] = useState("");
-  const [linkButtonLabel, setLinkButtonLabel] = useState("Open link");
-  const [secondLinkOpen, setSecondLinkOpen] = useState(false);
-  const [secondaryDestinationUrl, setSecondaryDestinationUrl] = useState("");
-  const [secondaryButtonLabel, setSecondaryButtonLabel] = useState("Open link");
-  const [requireFollow, setRequireFollow] = useState(false);
-  const [followPromptMessage, setFollowPromptMessage] = useState("");
+  const [dmMessage, setDmMessage] = useState(initial?.dmMessage ?? "");
+  const [linkOpen, setLinkOpen] = useState(Boolean(initial?.trackedDestinationUrl));
+  const [trackedDestinationUrl, setTrackedDestinationUrl] = useState(initial?.trackedDestinationUrl ?? "");
+  const [linkButtonLabel, setLinkButtonLabel] = useState(initial?.linkButtonLabel ?? "Open link");
+  const [secondLinkOpen, setSecondLinkOpen] = useState(Boolean(initial?.secondaryDestinationUrl));
+  const [secondaryDestinationUrl, setSecondaryDestinationUrl] = useState(initial?.secondaryDestinationUrl ?? "");
+  const [secondaryButtonLabel, setSecondaryButtonLabel] = useState(initial?.secondaryButtonLabel ?? "Open link");
+  const [requireFollow, setRequireFollow] = useState(initial?.requireFollow ?? false);
+  const [followPromptMessage, setFollowPromptMessage] = useState(initial?.followPromptMessage ?? "");
   const [followPromptButtonLabel, setFollowPromptButtonLabel] =
-    useState("i'm following");
-  const [followUpEnabled, setFollowUpEnabled] = useState(false);
-  const [followUpMessage, setFollowUpMessage] = useState("");
-  const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(0);
+    useState(initial?.followPromptButtonLabel ?? "i'm following");
+  const [followUpEnabled, setFollowUpEnabled] = useState(initial?.followUpEnabled ?? false);
+  const [followUpMessage, setFollowUpMessage] = useState(initial?.followUpMessage ?? "");
+  const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(initial?.followUpDelayMinutes ?? 0);
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
 
@@ -227,8 +238,9 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     };
   }, [selectedAccountId]);
 
-  // Load accounts (both modes need them for the preview username + selector).
+  // Templates are account-independent; campaigns load the account selector.
   useEffect(() => {
+    if (mode === "template") return;
     fetch("/api/dashboard/stats")
       .then((r) => r.json())
       .then((payload) => {
@@ -240,7 +252,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         );
       })
       .catch(() => setAccounts([]));
-  }, []);
+  }, [mode]);
 
   // Prefill when editing.
   useEffect(() => {
@@ -261,6 +273,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setWholeWordMatch(c.wholeWordMatch ?? true);
         setPublicReplyEnabled(c.publicReplyEnabled);
         setPublicReplyMessages(
           c.publicReplyMessages?.length
@@ -349,7 +362,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
   // Pick up a staged CSV import (new mode only) and prefill the first row.
   /* eslint-disable react-hooks/set-state-in-effect */
   useEffect(() => {
-    if (mode !== "new") return;
+    if (mode !== "new" || template) return;
     try {
       const raw = window.localStorage.getItem(IMPORT_QUEUE_KEY);
       const acct = window.localStorage.getItem(IMPORT_ACCOUNT_KEY);
@@ -363,7 +376,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
     } catch {
       // ignore a malformed queue
     }
-  }, [mode]);
+  }, [mode, template]);
   /* eslint-enable react-hooks/set-state-in-effect */
 
   const username =
@@ -383,6 +396,59 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
   function ensureLinkToken() {
     setDmMessage((cur) => (cur.includes("{link}") ? cur : `${cur.trim()} {link}`.trim()));
+  }
+
+  function getTemplateConfig(): TemplateConfig {
+    return {
+      version: 1,
+      triggerScope,
+      keywords,
+      matchAnyWord: matchMode === "any",
+      wholeWordMatch,
+      dmTriggerEnabled,
+      dmMessage,
+      openingDmEnabled,
+      openingDmMessage,
+      openingDmButtonLabel,
+      publicReplyEnabled,
+      publicReplyMessages,
+      trackedDestinationUrl: trackedDestinationUrl.trim(),
+      linkButtonLabel,
+      secondaryDestinationUrl: secondaryDestinationUrl.trim(),
+      secondaryButtonLabel,
+      requireFollow,
+      followPromptMessage,
+      followPromptButtonLabel,
+      followUpEnabled,
+      followUpMessage,
+      followUpDelayMinutes,
+    };
+  }
+
+  async function saveTemplate() {
+    const parsed = campaignTemplateSchema.safeParse({ name, config: getTemplateConfig() });
+    if (!parsed.success) {
+      setError(t("Could not save the template. Check the name, keywords and message settings, then try again."));
+      return;
+    }
+    setSaving(true);
+    setError(null);
+    try {
+      const response = await fetch(template
+        ? `/api/campaign-templates?id=${encodeURIComponent(template.id)}`
+        : "/api/campaign-templates", {
+        method: template ? "PUT" : "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify(parsed.data),
+      });
+      if (!response.ok) throw new Error("Template save failed");
+      router.push("/campaign-templates");
+      router.refresh();
+    } catch {
+      setError(t("Could not save the template. Check the name, keywords and message settings, then try again."));
+    } finally {
+      setSaving(false);
+    }
   }
 
   async function handleSubmit(activeValue: boolean) {
@@ -409,6 +475,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       dmTriggerEnabled,
+      wholeWordMatch,
       dmMessage,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
@@ -554,6 +621,11 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
 
   return (
     <div className="space-y-6">
+      {mode === "template" ? (
+        <p className="rounded border border-border p-4 text-sm text-muted">{t("Edit the reusable flow here. Choose the account and post when you use it in a campaign.")} {t("Changes to this template do not affect existing campaigns.")}</p>
+      ) : template ? (
+        <p className="rounded border border-accent/30 bg-accent/5 p-4 text-sm">{t("Using template: {name}", { name: template.name })} {t("Review the account, post, keywords and links before going live.")}</p>
+      ) : null}
       {importQueue && (
         <div className="rounded border border-accent/30 bg-accent/5 px-4 py-3 text-sm">
           <span className="font-medium text-foreground">
@@ -582,10 +654,12 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               </span>
             </>
           ) : (
-            <span className="text-sm text-muted">{t("New campaign")}</span>
+            <span className="text-sm text-muted">{mode === "template" ? t(template ? "Edit template" : "New template") : t("New campaign")}</span>
           )}
         </div>
-        <div className="ml-auto flex items-center gap-2">
+        <div className="ml-auto flex flex-wrap items-center gap-2">
+          {mode === "template" && <Link href="/campaign-templates" className="rounded-lg border border-border px-4 py-2 text-sm">{t("Cancel")}</Link>}
+          {mode === "new" && template && <button type="button" disabled={saving} onClick={() => handleSubmit(false)} className="rounded-lg border border-border px-4 py-2 text-sm">{t("Save paused")}</button>}
           {importQueue && (
             <button
               type="button"
@@ -618,14 +692,16 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             ))}
           <button
             type="button"
-            onClick={() => handleSubmit(mode === "new" ? true : isActive)}
+            onClick={() => mode === "template" ? saveTemplate() : handleSubmit(mode === "new" ? true : isActive)}
             disabled={saving}
             className="rounded-lg bg-accent px-5 py-2 text-sm font-medium text-white hover:bg-accent-hover disabled:opacity-50"
           >
-            {saving ? t("Saving…") : mode === "new" ? t("Go Live") : t("Save changes")}
+            {saving ? t("Saving…") : mode === "template" ? t("Save template") : mode === "new" ? t("Go Live") : t("Save changes")}
           </button>
         </div>
       </div>
+
+      {mode !== "template" && <SaveTemplate defaultName={name} getConfig={getTemplateConfig} />}
 
       {/* min-w-0 on the cells: a grid item defaults to min-width:auto, so a
           long string widens the whole page instead of wrapping. */}
@@ -633,17 +709,18 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
       {/* Left: controls */}
       <div className="space-y-8 min-w-0">
         {error && (
-          <div className="rounded border border-error/20 bg-error/10 p-3 text-sm text-error">
+          <div role="alert" className="rounded border border-error/20 bg-error/10 p-3 text-sm text-error">
             {error}
           </div>
         )}
 
         <div className="space-y-3">
-          <label className="text-sm font-semibold text-foreground">
-            {t("Campaign name")}{" "}
-            <span className="font-normal text-muted">{t("(optional)")}</span>
+          <label htmlFor="builder-name" className="text-sm font-semibold text-foreground">
+            {mode === "template" ? t("Template name") : t("Campaign name")}{" "}
+            {mode !== "template" && <span className="font-normal text-muted">{t("(optional)")}</span>}
           </label>
           <input
+            id="builder-name"
             value={name}
             onChange={(e) => setName(e.target.value)}
             placeholder={t("e.g. YC referral")}
@@ -675,7 +752,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
           >
             {t("a specific post or reel")}
           </Radio>
-          {triggerScope === "specific" && (
+          {triggerScope === "specific" && mode !== "template" && (
             <div className="rounded-lg border border-border p-2">
               <PostPicker
                 selectedPostId={postId}
@@ -729,6 +806,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               {matchMode === "any" ? t("anything") : t("these words")}
             </span>
             <Toggle
+              label={`${t("also reply when someone DMs")} ${matchMode === "any" ? t("anything") : t("these words")}`}
               on={dmTriggerEnabled}
               onToggle={() => setDmTriggerEnabled(!dmTriggerEnabled)}
             />
@@ -745,6 +823,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
               {t("reply to their comments under the post")}
             </span>
             <Toggle
+              label={t("reply to their comments under the post")}
               on={publicReplyEnabled}
               onToggle={() => setPublicReplyEnabled(!publicReplyEnabled)}
             />
@@ -803,6 +882,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">{t("an opening DM")}</span>
               <Toggle
+                label={t("an opening DM")}
                 on={openingDmEnabled}
                 onToggle={() => setOpeningDmEnabled(!openingDmEnabled)}
               />
@@ -833,6 +913,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 {t("a follow requirement first")}
               </span>
               <Toggle
+                label={t("a follow requirement first")}
                 on={requireFollow}
                 onToggle={() => setRequireFollow(!requireFollow)}
               />
@@ -934,6 +1015,7 @@ export default function CampaignBuilder({ mode, campaignId }: CampaignBuilderPro
                 {t("a follow-up thank-you message")}
               </span>
               <Toggle
+                label={t("a follow-up thank-you message")}
                 on={followUpEnabled}
                 onToggle={() => setFollowUpEnabled(!followUpEnabled)}
               />

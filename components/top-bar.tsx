@@ -11,6 +11,8 @@ import { useI18n } from "@/lib/i18n/provider";
 import { usePathname } from "next/navigation";
 
 const pageTitles: Record<string, StaticMessageKey> = {
+  "/campaign-templates": "My templates",
+  "/campaign-templates/new": "New template",
   "/dashboard": "Dashboard",
   "/overview": "Overview",
   "/inbox": "Inbox",
@@ -38,6 +40,7 @@ export default function TopBar({
   const { t } = useI18n();
   const pathname = usePathname();
   const title: StaticMessageKey = pageTitles[pathname] ?? (
+    pathname.startsWith("/campaign-templates/") ? "Edit template" :
     pathname.endsWith("/edit") ? "Edit campaign"
       : pathname.startsWith("/campaigns/") ? "Campaign details" : "Dashboard"
   );
