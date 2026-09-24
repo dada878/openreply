@@ -57,6 +57,8 @@ export interface OverviewPost {
   timestamp: string;
   views: number | null;
   reach: number | null;
+  followersGained: number;
+  emailCaptures: number;
   likes: number;
   comments: number;
   saved: number | null;
@@ -160,7 +162,7 @@ export async function GET(request: NextRequest) {
           const data = await getMediaInsights({
             context: accessToken,
             mediaId: m.id,
-            metrics: metrics,
+            metrics,
           });
           insightsAvailable = true;
           return data;
@@ -170,6 +172,82 @@ export async function GET(request: NextRequest) {
         }
       }
     );
+
+    // Email captures are campaign-scoped, so map them back to the selected
+    // post through the campaign's postId. A reusable lead appears once per
+    // resource campaign, which lets each content item show the contacts it
+    // generated for that resource.
+    const postIds = media.map((m) => m.id);
+    const postAutomations = postIds.length
+      ? await prisma.automation.findMany({
+          where: { instagramAccountId: account.id, postId: { in: postIds } },
+          select: { id: true, postId: true },
+        })
+      : [];
+    const automationIds = postAutomations.map((automation) => automation.id);
+    const emailCounts = automationIds.length
+      ? await prisma.emailCapture.groupBy({
+          by: ["automationId"],
+          where: {
+            instagramAccountId: account.id,
+            automationId: { in: automationIds },
+            email: { not: null },
+            capturedAt: { not: null },
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const emailCountByAutomation = new Map(
+      emailCounts.map((row) => [row.automationId, row._count._all]),
+    );
+    // New conversions carry the actual comment-triggering post ID. This is
+    // essential for matchAnyPost / next-reel campaigns whose Automation.postId
+    // is null. Keep the automation fallback for conversions recorded before
+    // sourcePostId was introduced.
+    const followCountsBySourcePost = postIds.length
+      ? await prisma.followConversion.groupBy({
+          by: ["sourcePostId"],
+          where: {
+            instagramAccountId: account.id,
+            sourcePostId: { in: postIds },
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const followCountBySourcePost = new Map(
+      followCountsBySourcePost
+        .filter((row) => row.sourcePostId !== null)
+        .map((row) => [row.sourcePostId as string, row._count._all]),
+    );
+    const followCounts = automationIds.length
+      ? await prisma.followConversion.groupBy({
+          by: ["automationId"],
+          where: {
+            instagramAccountId: account.id,
+            automationId: { in: automationIds },
+            sourcePostId: null,
+          },
+          _count: { _all: true },
+        })
+      : [];
+    const followCountByAutomation = new Map(
+      followCounts.map((row) => [row.automationId, row._count._all]),
+    );
+    const emailCountByPost = new Map<string, number>();
+    const followCountByPost = new Map<string, number>();
+    for (const automation of postAutomations) {
+      if (!automation.postId) continue;
+      emailCountByPost.set(
+        automation.postId,
+        (emailCountByPost.get(automation.postId) ?? 0) +
+          (emailCountByAutomation.get(automation.id) ?? 0),
+      );
+      followCountByPost.set(
+        automation.postId,
+        (followCountBySourcePost.get(automation.postId) ?? 0) +
+          (followCountByAutomation.get(automation.id) ?? 0),
+      );
+    }
 
     const posts: OverviewPost[] = media.map((m, i) => {
       const ins = insights[i];
@@ -184,6 +262,8 @@ export async function GET(request: NextRequest) {
         timestamp: m.timestamp,
         views: ins?.views ?? null,
         reach: ins?.reach ?? null,
+        followersGained: followCountByPost.get(m.id) ?? 0,
+        emailCaptures: emailCountByPost.get(m.id) ?? 0,
         likes,
         comments,
         saved: ins?.saved ?? null,

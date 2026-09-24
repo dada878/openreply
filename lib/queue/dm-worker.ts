@@ -5,6 +5,22 @@ import {
   isDeliveryUnconfirmed,
 } from "@/lib/instagram/delivery-errors";
 import { claimCommentDelivery, MAX_COMMENT_SEND_ATTEMPTS } from "./comment-delivery";
+import {
+  captureEmail,
+  claimEmailContentDelivery,
+  claimEmailPrompt,
+  DEFAULT_INVALID_EMAIL_MESSAGE,
+  DEFAULT_EMAIL_PROMPT,
+  markEmailContentDelivered,
+  markEmailPromptDelivered,
+  normalizeCapturedEmail,
+  recordEmailContentFailure,
+  recordEmailPromptFailure,
+  startEmailCapture,
+} from "@/lib/leads/email-capture";
+import { recordFollowConversion } from "@/lib/leads/follow-conversion";
+import { generatePublicReply } from "@/lib/ai/public-reply";
+import { getWorkspaceAiSettings } from "@/lib/ai/settings";
 import { createHash } from "node:crypto";
 import { UnrecoverableError, Worker, type Job } from "bullmq";
 import {
@@ -25,6 +41,7 @@ import {
   RateLimitError,
   TokenExpiredError,
   getUserFollowStatus,
+  getRecipientProfile,
   sendCommentReply,
   sendDirectMessage,
   sendDirectMessageWithButton,
@@ -50,6 +67,7 @@ import {
   renderMessageWithTracking,
   renderMessageWithoutLink,
 } from "@/lib/tracking/message";
+import { appendMarketingTrackingParams, type MarketingTrackingContext } from "@/lib/tracking/marketing-params";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
 
 import { ZernioApiError } from "@/lib/zernio/client";
@@ -64,6 +82,70 @@ function formatError(error: unknown): string {
     return error.message;
   }
   return "Unknown error";
+}
+
+async function resolvePublicReply({
+  context,
+  automation,
+  userId,
+  commenterName,
+  displayName,
+  commentText,
+  fallback,
+}: {
+  context: InstagramContext;
+  automation: {
+    workspaceId: string;
+    aiPublicReplyEnabled: boolean;
+    aiPublicReplyPrompt: string | null;
+    aiPublicReplyModel: string | null;
+    instagramAccount: { username: string };
+  };
+  userId: string;
+  commenterName: string | null | undefined;
+  displayName: string | null | undefined;
+  commentText: string;
+  fallback: string;
+}): Promise<string> {
+  if (!automation.aiPublicReplyEnabled || !automation.aiPublicReplyPrompt?.trim()) {
+    return fallback;
+  }
+
+  let resolvedDisplayName = displayName ?? null;
+  let resolvedUsername = commenterName ?? null;
+  if (context.provider === "META" && (!resolvedDisplayName || !resolvedUsername)) {
+    try {
+      const profile = await getRecipientProfile({ context, recipientId: userId });
+      resolvedDisplayName ||= profile?.name ?? null;
+      resolvedUsername ||= profile?.username ?? null;
+    } catch (error) {
+      // Profile lookup is enrichment only. A transient profile API failure
+      // must never prevent the saved public reply from being sent.
+      console.warn("[DM Worker] Recipient profile lookup failed; using webhook data:", formatError(error));
+    }
+  }
+
+  try {
+    const aiSettings = await getWorkspaceAiSettings(automation.workspaceId);
+    const generated = await generatePublicReply({
+        apiKey: aiSettings.apiKey,
+        prompt: automation.aiPublicReplyPrompt,
+        model: automation.aiPublicReplyModel ?? aiSettings.defaultModel,
+        username: resolvedUsername,
+        displayName: resolvedDisplayName,
+        commentText,
+        accountUsername: automation.instagramAccount.username,
+        existingReply: fallback,
+      });
+    return (generated ?? fallback)
+      .replace(/\{username\}/gi, resolvedUsername ?? "there")
+      .replace(/\{display_name\}/gi, resolvedDisplayName ?? resolvedUsername ?? "there")
+      .replace(/\{account_name\}/gi, automation.instagramAccount.username)
+      .replace(/\{comment\}/gi, commentText);
+  } catch (error) {
+    console.warn("[DM Worker] AI public reply failed; using saved reply:", formatError(error));
+    return fallback;
+  }
 }
 
 // Meta rejections that a plain-text retry cannot fix: the send was refused for
@@ -104,10 +186,11 @@ type WorkerTrackedLink = {
  */
 function buildLinkButtons(
   trackedLinks: WorkerTrackedLink[],
-  primaryLabel: string | null
+  primaryLabel: string | null,
+  tracking?: MarketingTrackingContext,
 ): { title: string; url: string }[] {
   return trackedLinks.slice(0, 3).map((link, index) => ({
-    url: buildTrackedUrl(link.slug),
+    url: buildTrackedUrl(link.slug, undefined, tracking),
     title:
       (index === 0 ? primaryLabel : link.label) || link.label || "Open link",
   }));
@@ -122,22 +205,41 @@ function buildInlineLinkFallback(
   message: string,
   commenterName: string | null | undefined,
   trackedLinks: WorkerTrackedLink[],
-  bodyText: string
+  bodyText: string,
+  tracking?: MarketingTrackingContext,
 ): string {
   const base =
-    renderMessageWithTracking({ message, commenterName, trackedLinks }) ||
+    renderMessageWithTracking({ message, commenterName, trackedLinks, tracking }) ||
     bodyText;
   const extraUrls = trackedLinks
     .slice(1)
-    .map((link) => buildTrackedUrl(link.slug));
+    .map((link) => buildTrackedUrl(link.slug, undefined, tracking));
   return extraUrls.length > 0 ? `${base}\n${extraUrls.join("\n")}` : base;
 }
 
 type RevealAutomation = {
+  id: string;
   dmMessage: string;
   linkButtonLabel: string | null;
   trackedLinks: WorkerTrackedLink[];
-  instagramAccount: { instagramId: string };
+  instagramAccount: { instagramId: string; username: string };
+  trackingParamKeys: string[];
+  trackingEventId: string | null;
+  postId: string | null;
+};
+
+type EmailGateAutomation = RevealAutomation & {
+  id: string;
+  workspaceId: string;
+  instagramAccountId: string;
+  collectEmail: boolean;
+  emailPromptMessage: string | null;
+  emailInvalidMessage: string | null;
+  followUpEnabled: boolean;
+  followUpMessage: string | null;
+  followUpDestinationUrl: string | null;
+  followUpButtonLabel: string | null;
+  followUpDelayMinutes: number | null;
 };
 
 /**
@@ -158,6 +260,15 @@ async function sendRevealDirectMessage({
   commenterName: string | null;
   context: string;
 }): Promise<void> {
+  const tracking: MarketingTrackingContext = {
+    keys: automation.trackingParamKeys,
+    accountName: automation.instagramAccount.username,
+    accountId: automation.instagramAccount.instagramId,
+    campaignId: automation.id,
+    eventId: automation.trackingEventId,
+    videoId: automation.postId,
+    commenterId: userId,
+  };
   if (automation.trackedLinks.length === 0) {
     await sendDirectMessage({
       context: accessToken,
@@ -167,6 +278,7 @@ async function sendRevealDirectMessage({
         message: automation.dmMessage,
         commenterName,
         trackedLinks: automation.trackedLinks,
+        tracking,
       }),
     });
     return;
@@ -180,7 +292,8 @@ async function sendRevealDirectMessage({
     }) || "Here's your link:";
   const buttons = buildLinkButtons(
     automation.trackedLinks,
-    automation.linkButtonLabel
+    automation.linkButtonLabel,
+    tracking,
   );
 
   try {
@@ -209,12 +322,194 @@ async function sendRevealDirectMessage({
           automation.dmMessage,
           commenterName,
           automation.trackedLinks,
-          bodyText
+          bodyText,
+          tracking
         ),
       });
     } catch (fallbackError) {
       throw classifySendError(fallbackError);
     }
+  }
+}
+
+async function requestEmailBeforeReveal({
+  accessToken,
+  automation,
+  userId,
+  commenterName,
+  operationId,
+}: {
+  accessToken: InstagramContext;
+  automation: EmailGateAutomation;
+  userId: string;
+  commenterName: string | null;
+  operationId: string;
+}) {
+  const capture = await startEmailCapture({
+    workspaceId: automation.workspaceId,
+    automationId: automation.id,
+    instagramAccountId: automation.instagramAccountId,
+    commenterId: userId,
+    commenterName,
+  });
+
+  if (capture.email || capture.emailPromptSentAt || capture.emailPromptDeliveryUnconfirmed) {
+    return capture;
+  }
+
+  if (!(await claimEmailPrompt(capture.id))) return capture;
+
+  const prompt = renderMessageWithoutLink({
+    message: automation.emailPromptMessage || DEFAULT_EMAIL_PROMPT,
+    commenterName,
+  });
+  try {
+    const delivered = await sendPostbackOnce({
+      operationId,
+      send: () =>
+        sendDirectMessage({
+          context: accessToken,
+          instagramAccountId: automation.instagramAccount.instagramId,
+          userId,
+          message: prompt,
+        }),
+    });
+    if (delivered) await markEmailPromptDelivered(capture.id);
+  } catch (originalError) {
+    const error = classifySendError(originalError);
+    await recordEmailPromptFailure({
+      id: capture.id,
+      errorMessage: formatError(error),
+      deliveryUnconfirmed: isDeliveryUnconfirmed(error),
+    });
+    throw error;
+  }
+
+  return capture;
+}
+
+async function requestEmailFromComment({
+  accessToken,
+  automation,
+  commentId,
+  postId,
+  userId,
+  commenterName,
+}: {
+  accessToken: InstagramContext;
+  automation: EmailGateAutomation;
+  commentId: string;
+  postId: string;
+  userId: string;
+  commenterName: string | null;
+}) {
+  const capture = await startEmailCapture({
+    workspaceId: automation.workspaceId,
+    automationId: automation.id,
+    instagramAccountId: automation.instagramAccountId,
+    commenterId: userId,
+    commenterName,
+  });
+  if (capture.email || capture.emailPromptSentAt || capture.emailPromptDeliveryUnconfirmed) return capture;
+  if (!(await claimEmailPrompt(capture.id))) return capture;
+
+  try {
+    await sendPrivateReply({
+      context: accessToken,
+      instagramAccountId: automation.instagramAccount.instagramId,
+      commentId,
+      postId,
+      message: renderMessageWithoutLink({
+        message: automation.emailPromptMessage || DEFAULT_EMAIL_PROMPT,
+        commenterName,
+      }),
+    });
+    await markEmailPromptDelivered(capture.id);
+  } catch (originalError) {
+    const error = classifySendError(originalError);
+    await recordEmailPromptFailure({
+      id: capture.id,
+      errorMessage: formatError(error),
+      deliveryUnconfirmed: isDeliveryUnconfirmed(error),
+    });
+    throw error;
+  }
+
+  return capture;
+}
+
+async function scheduleFollowUp({
+  automation,
+  userId,
+  commenterName,
+}: {
+  automation: EmailGateAutomation;
+  userId: string;
+  commenterName: string | null;
+}) {
+  if (!automation.followUpEnabled || !automation.followUpMessage?.trim()) return;
+  await getDMQueue().add(
+    FOLLOWUP_JOB_NAME,
+    {
+      instagramAccountId: automation.instagramAccount.instagramId,
+      accountConnectionId: automation.instagramAccountId,
+      userId,
+      automationId: automation.id,
+      commenterName,
+    },
+    {
+      delay: Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000,
+      jobId: `followup_${automation.id}_${userId}`,
+    },
+  );
+}
+
+async function deliverCapturedEmailContent({
+  captureId,
+  accessToken,
+  automation,
+  userId,
+  commenterName,
+}: {
+  captureId: string;
+  accessToken: InstagramContext;
+  automation: EmailGateAutomation;
+  userId: string;
+  commenterName: string | null;
+}) {
+  if (!(await claimEmailContentDelivery(captureId))) return;
+
+  const usage = await reserveWorkspaceDMSend(automation.workspaceId);
+  if (!usage.allowed) {
+    await recordEmailContentFailure({
+      id: captureId,
+      errorMessage: `Monthly DM limit reached (${usage.limit})`,
+      deliveryUnconfirmed: false,
+    });
+    return;
+  }
+
+  try {
+    await sendRevealDirectMessage({
+      accessToken,
+      automation,
+      userId,
+      commenterName,
+      context: "email capture",
+    });
+    await markEmailContentDelivered(captureId);
+    await scheduleFollowUp({ automation, userId, commenterName });
+  } catch (originalError) {
+    const error = classifySendError(originalError);
+    if (isConfirmedSendRejection(error)) {
+      await releaseWorkspaceDMReservation(automation.workspaceId, usage.periodStart);
+    }
+    await recordEmailContentFailure({
+      id: captureId,
+      errorMessage: formatError(error),
+      deliveryUnconfirmed: isDeliveryUnconfirmed(error),
+    });
+    throw error;
   }
 }
 
@@ -230,6 +525,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     commentText,
     commenterId,
     commenterName,
+    commenterDisplayName,
     mediaId,
     originalMediaId,
   } = job.data;
@@ -268,6 +564,15 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
   });
 
   for (const automation of automations) {
+    const tracking: MarketingTrackingContext = {
+      keys: automation.trackingParamKeys,
+      accountName: automation.instagramAccount.username,
+      accountId: automation.instagramAccount.instagramId,
+      campaignId: automation.id,
+      eventId: automation.trackingEventId,
+      videoId: automation.postId ?? mediaId,
+      commenterId,
+    };
     // "Any word" campaigns fire on every comment; otherwise require a keyword hit.
     const matchResult = automation.matchAnyWord
       ? { matched: true, matchedKeyword: null }
@@ -298,9 +603,10 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       existingLog.dmDeliveryUnconfirmed = true;
     }
 
+    const commentDmEnabled = automation.commentDmEnabled !== false;
     const alreadyDmd = existingLog?.status === "SENT";
     const alreadyPublicReplied = Boolean(existingLog?.publicReplySentAt);
-    const needsDm = !alreadyDmd && !existingLog?.dmDeliveryUnconfirmed &&
+    const needsDm = commentDmEnabled && !alreadyDmd && !existingLog?.dmDeliveryUnconfirmed &&
       (existingLog?.attempts ?? 0) < MAX_COMMENT_SEND_ATTEMPTS;
 
     // Skip only when there is genuinely nothing left to do. A comment whose DM
@@ -398,19 +704,35 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         : automation.publicReplyMessage
           ? [automation.publicReplyMessage]
           : [];
+    const canGeneratePublicReply = Boolean(
+      automation.aiPublicReplyEnabled && automation.aiPublicReplyPrompt?.trim(),
+    );
+    let publicReplyCompleted = alreadyPublicReplied;
     if (
       automation.publicReplyEnabled &&
-      replyPool.length > 0 &&
+      (replyPool.length > 0 || canGeneratePublicReply) &&
       !existingLog?.publicReplySentAt &&
       !existingLog?.publicReplyDeliveryUnconfirmed &&
       await claimCommentDelivery(automation.id, commentId, "public")
     ) {
       try {
-        const chosen = replyPool[Math.floor(Math.random() * replyPool.length)];
+        const chosen = replyPool.length > 0
+          ? replyPool[Math.floor(Math.random() * replyPool.length)]
+          : "Thanks for your comment!";
+        const generatedReply = await resolvePublicReply({
+          context: accessToken,
+          automation,
+          userId: commenterId,
+          commenterName,
+          displayName: commenterDisplayName,
+          commentText,
+          fallback: chosen,
+        });
         const publicReply = renderMessageWithTracking({
-          message: chosen,
+          message: generatedReply,
           commenterName,
           trackedLinks: automation.trackedLinks,
+          tracking,
         });
         await sendCommentReply({
           context: accessToken,
@@ -424,6 +746,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           },
           data: { publicReplySentAt: new Date(), publicReplyError: null, publicReplyDeliveryUnconfirmed: false },
         });
+        publicReplyCompleted = true;
       } catch (error) {
         console.error(
           "[DM Worker] Public comment reply failed:",
@@ -445,7 +768,18 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
 
     // DM already sent on an earlier pass; the public reply retry above was all
     // this run needed. Don't re-send the DM.
-    if (!needsDm) continue;
+    if (!needsDm) {
+      if (!commentDmEnabled && publicReplyCompleted) {
+        await prisma.dmLog.update({
+          where: { automationId_commentId: { automationId: automation.id, commentId } },
+          data: {
+            status: "SKIPPED_DM_DISABLED",
+            errorMessage: "Private DM disabled for this campaign; public reply handled separately",
+          },
+        }).catch(() => {});
+      }
+      continue;
+    }
 
     // Meta allows exactly ONE private reply per comment, ever — across every
     // campaign. When several campaigns match the same comment (duplicated
@@ -577,6 +911,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       automation.openingDmEnabled &&
       Boolean(automation.openingDmMessage) &&
       Boolean(automation.openingDmButtonLabel);
+    const followCheckPayload = `followcheck:${automation.id}:${mediaId}`;
 
     // Follow-gating: the link is revealed only after a follow. When an opening
     // DM is enabled it comes FIRST, and its button routes into the follow check
@@ -623,7 +958,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           text: openingText,
           buttonTitle: automation.openingDmButtonLabel as string,
           payload: automation.requireFollow
-            ? `followcheck:${automation.id}`
+            ? followCheckPayload
             : `reveal:${automation.id}`,
           postId: mediaId,
         });
@@ -640,9 +975,38 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commentId: commentId,
           text: promptText,
           buttonTitle: automation.followPromptButtonLabel || "i'm following",
-          payload: `followcheck:${automation.id}`,
+          payload: followCheckPayload,
           postId: mediaId,
         });
+      } else if (automation.collectEmail) {
+        const capture = await requestEmailFromComment({
+          accessToken,
+          automation,
+          commentId,
+          postId: mediaId,
+          userId: commenterId,
+          commenterName: commenterName ?? null,
+        });
+        if (
+          capture.email &&
+          !capture.contentDeliveredAt &&
+          !capture.contentDeliveryUnconfirmed
+        ) {
+          // The comment path already reserved the DM quota for this send. Move
+          // that reservation to the shared delivery helper so an inherited
+          // email does not consume the quota twice.
+          await releaseWorkspaceDMReservation(
+            automation.workspaceId,
+            usage.periodStart,
+          );
+          await deliverCapturedEmailContent({
+            captureId: capture.id,
+            accessToken,
+            automation,
+            userId: commenterId,
+            commenterName: commenterName ?? null,
+          });
+        }
       } else if (automation.trackedLinks.length > 0) {
         // Try button template first; if Meta rejects it, fall back to inline links.
         const bodyText =
@@ -652,7 +1016,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           }) || "Here's your link:";
         const buttons = buildLinkButtons(
           automation.trackedLinks,
-          automation.linkButtonLabel
+          automation.linkButtonLabel,
+          tracking,
         );
 
         try {
@@ -678,7 +1043,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             automation.dmMessage,
             commenterName,
             automation.trackedLinks,
-            bodyText
+            bodyText,
+            tracking
           );
           try {
             await sendPrivateReply({
@@ -697,6 +1063,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           message: automation.dmMessage,
           commenterName,
           trackedLinks: automation.trackedLinks,
+          tracking,
         });
         await sendPrivateReply({
           context: accessToken,
@@ -786,9 +1153,10 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
 
   const isFollowCheck = payload.startsWith("followcheck:");
   if (!isFollowCheck && !payload.startsWith("reveal:")) return;
-  const automationId = payload.slice(
+  const payloadTarget = payload.slice(
     isFollowCheck ? "followcheck:".length : "reveal:".length,
   );
+  const [automationId, sourcePostId] = payloadTarget.split(":", 2);
 
   const automation = await prisma.automation.findFirst({
     where: { id: automationId, isActive: true, ...connectionScope(job.data) },
@@ -867,10 +1235,30 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       context: accessToken,
       recipientId: userId,
     });
+    if (isFollowCheck && follows === true) {
+      try {
+        await recordFollowConversion({
+          workspaceId: automation.workspaceId,
+          automationId: automation.id,
+          instagramAccountId: automation.instagramAccountId,
+          commenterId: userId,
+          commenterName,
+          ...(sourcePostId ? { sourcePostId } : {}),
+        });
+      } catch (error) {
+        // Attribution must never block the resource delivery after Instagram
+        // has confirmed the user follows the account.
+        console.warn(
+          "[DM Worker] Could not record follow conversion:",
+          formatError(error),
+        );
+      }
+    }
     if (follows === false) {
       if (fallback) return;
       const promptText = renderMessageWithoutLink({
         message:
+          automation.followCheckFailedMessage ||
           automation.followPromptMessage ||
           "quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over",
         commenterName,
@@ -886,7 +1274,9 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
               text: promptText,
               buttonTitle:
                 automation.followPromptButtonLabel || "i'm following",
-              payload: `followcheck:${automation.id}`,
+              payload: sourcePostId
+                ? `followcheck:${automation.id}:${sourcePostId}`
+                : `followcheck:${automation.id}`,
             }),
         });
       } catch (error) {
@@ -897,6 +1287,26 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       }
       return;
     }
+  }
+
+  if (automation.collectEmail) {
+    const capture = await requestEmailBeforeReveal({
+      accessToken,
+      automation,
+      userId,
+      commenterName,
+      operationId,
+    });
+    if (capture.email && !capture.contentDeliveredAt && !capture.contentDeliveryUnconfirmed) {
+      await deliverCapturedEmailContent({
+        captureId: capture.id,
+        accessToken,
+        automation,
+        userId,
+        commenterName,
+      });
+    }
+    return;
   }
 
   const usage = await reserveWorkspaceDMSend(automation.workspaceId);
@@ -1070,13 +1480,60 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   }
 
   try {
+    const message = automation.followUpMessage;
+    const destinationUrl = automation.followUpDestinationUrl
+      ? appendMarketingTrackingParams(automation.followUpDestinationUrl, {
+          keys: automation.trackingParamKeys,
+          accountName: automation.instagramAccount.username,
+          accountId: automation.instagramAccount.instagramId,
+          campaignId: automation.id,
+          eventId: automation.trackingEventId,
+          commenterId: userId,
+        })
+      : null;
+    const bodyText = renderMessageWithoutLink({
+      message,
+      commenterName: commenterName ?? null,
+    });
+
+    if (!destinationUrl) {
+      await sendDirectMessage({
+        context: accessToken,
+        instagramAccountId: automation.instagramAccount.instagramId,
+        userId: userId,
+        message: bodyText,
+      });
+      return;
+    }
+
+    try {
+      await sendDirectMessageWithLinkButton({
+        context: accessToken,
+        instagramAccountId: automation.instagramAccount.instagramId,
+        userId,
+        text: bodyText || "Thanks!",
+        buttons: [{
+          title: automation.followUpButtonLabel || "Open link",
+          url: destinationUrl,
+        }],
+      });
+      return;
+    } catch (buttonError) {
+      if (!isTemplateRejection(buttonError)) throw buttonError;
+      console.log(
+        "[DM Worker] Follow-up link button rejected, falling back to inline link:",
+        formatError(buttonError)
+      );
+    }
+
     await sendDirectMessage({
       context: accessToken,
       instagramAccountId: automation.instagramAccount.instagramId,
       userId: userId,
-      message: renderMessageWithoutLink({
-        message: automation.followUpMessage,
+      message: renderFollowUpWithInlineLink({
+        message,
         commenterName: commenterName ?? null,
+        destinationUrl,
       }),
     });
   } catch (error) {
@@ -1085,6 +1542,101 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
       formatError(error)
     );
   }
+}
+
+function renderFollowUpWithInlineLink({
+  message,
+  commenterName,
+  destinationUrl,
+}: {
+  message: string;
+  commenterName: string | null;
+  destinationUrl: string;
+}): string {
+  const personalized = message.replace(/\{username\}/gi, commenterName ?? "there");
+  if (/\{link\}/i.test(personalized)) {
+    return personalized.replace(/\{link\}/gi, destinationUrl).trim();
+  }
+  return `${personalized.trim()}\n${destinationUrl}`.trim();
+}
+
+async function processPendingEmailCaptures(job: Job<ProcessMessageJob>): Promise<boolean> {
+  const { instagramAccountId, messageId, messageText, senderId } = job.data;
+  const captures = await prisma.emailCapture.findMany({
+    where: {
+      commenterId: senderId,
+      email: null,
+      automation: {
+        isActive: true,
+        collectEmail: true,
+        instagramAccount: { instagramId: instagramAccountId },
+      },
+    },
+    include: {
+      automation: {
+        include: {
+          instagramAccount: true,
+          trackedLinks: {
+            select: { slug: true, label: true, destinationUrl: true },
+            orderBy: TRACKED_LINK_ORDER,
+          },
+        },
+      },
+    },
+    orderBy: { requestedAt: "asc" },
+  });
+  if (!captures.length) return false;
+
+  const email = normalizeCapturedEmail(messageText);
+  for (const capture of captures) {
+    const automation = capture.automation;
+    if (!hasInstagramCredentials(automation.instagramAccount)) continue;
+    let accessToken: InstagramContext;
+    try {
+      accessToken = await createInstagramContext(
+        automation.instagramAccount,
+        `${job.id}:${automation.id}`,
+      );
+    } catch {
+      continue;
+    }
+
+    if (!email) {
+      const invalidReplyOperationId = createHash("sha256")
+        .update(JSON.stringify(["email-invalid", capture.id, messageId]))
+        .digest("hex");
+      await sendPostbackOnce({
+        operationId: invalidReplyOperationId,
+        send: () =>
+          sendDirectMessage({
+            context: accessToken,
+            instagramAccountId: automation.instagramAccount.instagramId,
+            userId: senderId,
+            // The original email prompt was already delivered when this
+            // capture started. Keep the validation error as its own DM instead
+            // of appending it to that prompt or sending the prompt again.
+            message: renderMessageWithoutLink({
+              message:
+                automation.emailInvalidMessage || DEFAULT_INVALID_EMAIL_MESSAGE,
+              commenterName: capture.commenterName,
+            }),
+          }),
+      });
+      continue;
+    }
+
+    // A message webhook is delivered at least once, sometimes more. The atomic
+    // update makes only the first worker that sees this email unlock content.
+    if (!(await captureEmail(capture.id, email))) continue;
+    await deliverCapturedEmailContent({
+      captureId: capture.id,
+      accessToken,
+      automation,
+      userId: senderId,
+      commenterName: capture.commenterName,
+    });
+  }
+  return true;
 }
 
 /**
@@ -1097,6 +1649,10 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
  */
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const { instagramAccountId, messageId, messageText, senderId } = job.data;
+
+  // A pending email gate owns the next inbound message. Do not also run the
+  // keyword autoresponder, which could disclose the campaign content first.
+  if (await processPendingEmailCaptures(job)) return;
 
   const automations = await prisma.automation.findMany({
     where: {
@@ -1271,6 +1827,26 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           buttonTitle: automation.followPromptButtonLabel || "I'm following ✅",
           payload: `followcheck:${automation.id}`,
         });
+      } else if (automation.collectEmail) {
+        const emailOperationId = createHash("sha256")
+          .update(JSON.stringify(["email-request", automation.id, senderId, messageId]))
+          .digest("hex");
+        const capture = await requestEmailBeforeReveal({
+          accessToken,
+          automation,
+          userId: senderId,
+          commenterName,
+          operationId: emailOperationId,
+        });
+        if (capture.email && !capture.contentDeliveredAt && !capture.contentDeliveryUnconfirmed) {
+          await deliverCapturedEmailContent({
+            captureId: capture.id,
+            accessToken,
+            automation,
+            userId: senderId,
+            commenterName,
+          });
+        }
       } else {
         await sendRevealDirectMessage({
           accessToken: accessToken,

@@ -79,6 +79,7 @@ export async function reconcileComments(): Promise<void> {
       keywords: true,
       wholeWordMatch: true,
       publicReplyEnabled: true,
+      commentDmEnabled: true,
       workspaceId: true,
       instagramAccount: {
         select: {
@@ -130,6 +131,7 @@ async function sweepCampaign({
     keywords: string[];
     wholeWordMatch: boolean;
     publicReplyEnabled: boolean;
+    commentDmEnabled?: boolean;
     instagramAccount: {
       id: string;
       instagramId: string;
@@ -249,7 +251,7 @@ async function sweepCampaign({
       },
     });
     const handledSet = new Set(logs.filter((log) => {
-      const dmStopped = log.status === "SENT" || log.status === "SKIPPED_PLAN_LIMIT" ||
+      const dmStopped = automation.commentDmEnabled === false || log.status === "SENT" || log.status === "SKIPPED_PLAN_LIMIT" ||
         log.dmDeliveryUnconfirmed || log.attempts >= MAX_COMMENT_SEND_ATTEMPTS ||
         (log.status === "FAILED" && hasLegacyUnconfirmedDelivery(log.errorMessage));
       const replyStopped = !automation.publicReplyEnabled ||
@@ -276,6 +278,7 @@ async function sweepCampaign({
         commentText: c.text ?? "",
         commenterId: c.from!.id,
         commenterName: c.from?.username,
+        commenterDisplayName: c.from?.name,
         mediaId,
         // When the sweep is looking at an ad, the campaign is bound to the post
         // the ad was made from: without this the worker matches nothing and

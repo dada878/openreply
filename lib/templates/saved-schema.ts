@@ -12,22 +12,35 @@ export const templateConfigSchema = z
     keywords: z.array(z.string().trim().min(1).max(50)).max(10),
     matchAnyWord: z.boolean(),
     dmTriggerEnabled: z.boolean(),
+    // Keep old saved templates compatible; campaigns default to private replies.
+    commentDmEnabled: z.boolean().optional(),
     wholeWordMatch: z.boolean(),
-    dmMessage: message.refine((value) => value.trim().length > 0),
+    dmMessage: message,
     openingDmEnabled: z.boolean(),
     openingDmMessage: message,
     openingDmButtonLabel: z.string().max(64),
     publicReplyEnabled: z.boolean(),
     publicReplyMessages: z.array(message).max(10),
+    aiPublicReplyEnabled: z.boolean().optional(),
+    aiPublicReplyPrompt: z.string().max(2000).optional(),
+    aiPublicReplyModel: z.string().max(80).optional(),
     trackedDestinationUrl: destination,
+    trackingParamKeys: z.array(z.enum(["account_name", "account_id", "campaign_id", "event_id", "video_id", "commenter_id"])).max(6).optional(),
+    trackingEventId: z.string().max(120).optional(),
     linkButtonLabel: z.string().max(20),
     secondaryDestinationUrl: destination,
     secondaryButtonLabel: z.string().max(20),
     requireFollow: z.boolean(),
     followPromptMessage: message,
     followPromptButtonLabel: z.string().max(20),
+    followCheckFailedMessage: message.default(""),
+    collectEmail: z.boolean().default(false),
+    emailPromptMessage: message.default(""),
+    emailInvalidMessage: message.default(""),
     followUpEnabled: z.boolean(),
     followUpMessage: message,
+    followUpDestinationUrl: destination.default(""),
+    followUpButtonLabel: z.string().max(20).default(""),
     followUpDelayMinutes: z.number().int().min(0).max(1440),
   })
   .refine((value) => value.matchAnyWord || value.keywords.length > 0, {
@@ -42,6 +55,15 @@ export const templateConfigSchema = z
     {
       message: "Your opening DM needs a message and a button label.",
       path: ["openingDmMessage"],
+    },
+  )
+  .refine(
+    (value) =>
+      (value.commentDmEnabled === false && !value.dmTriggerEnabled) ||
+      value.dmMessage.trim().length > 0,
+    {
+      message: "Add a DM message when private replies are enabled.",
+      path: ["dmMessage"],
     },
   );
 

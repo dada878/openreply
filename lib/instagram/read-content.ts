@@ -6,7 +6,7 @@ type Comment = {
   id: string;
   message: string;
   createdTime: string;
-  from?: { id: string; username?: string };
+  from?: { id: string; username?: string; name?: string };
   replies?: Comment[];
 };
 

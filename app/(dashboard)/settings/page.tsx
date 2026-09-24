@@ -6,6 +6,8 @@ import { Suspense, useEffect, useState } from "react";
 import type { AccountOption } from "@/components/account-select";
 import { ZernioConnection } from "@/components/zernio-connection";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
+import ThemeSwitcher from "@/components/theme-switcher";
+import { AiConnection } from "@/components/ai-connection";
 
 interface SettingsData {
   workspace: {
@@ -145,9 +147,15 @@ export default function SettingsPage() {
         <h2 className="text-base font-semibold">{t("Interface language")}</h2>
         <LanguageSwitcher />
         <p className="text-sm text-muted">{t("Saved in this browser. Campaign messages stay unchanged.")}</p>
+        <div className="border-t border-border pt-3">
+          <p className="mb-2 text-sm font-medium">外觀</p>
+          <ThemeSwitcher />
+          <p className="mt-2 text-xs text-muted">暗色模式會套用到工作區、表單、表格與導覽列。</p>
+        </div>
       </section>
 
       <ZernioConnection canManage={canManageMembers} />
+      <AiConnection canManage={canManageMembers} />
 
       <section className="panel rounded p-4 sm:p-6">
         <h2 className="text-base font-semibold mb-6">{t("Instagram Connection")}</h2>

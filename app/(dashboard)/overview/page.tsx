@@ -10,7 +10,8 @@
 
 import type { Locale } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n/provider";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import AccountSelect from "@/components/account-select";
 import StatCard from "@/components/stat-card";
 import FollowerChart from "@/components/follower-chart";
@@ -37,40 +38,27 @@ const COUNT_OPTIONS = [
 
 export default function OverviewPage() {
   const { t, locale } = useI18n();
-  const [data, setData] = useState<OverviewResponse | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
   const [count, setCount] = useState("50");
-
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (selectedAccountId !== "all") {
-      params.set("instagramAccountId", selectedAccountId);
-    }
-    params.set("count", count);
-
-    fetch(`/api/instagram/overview?${params}`)
-      .then((r) => r.json())
-      .then((res) => {
-        if (res.success) {
-          setData(res.data);
-          setError(null);
-        } else {
-          setError(res.error ?? "Failed to load overview");
-        }
-      })
-      .catch(() => setError("Failed to load overview"))
-      .finally(() => setLoading(false));
-  }, [selectedAccountId, count]);
+  const { data, isLoading: loading, error } = useQuery({
+    queryKey: ["instagram-overview", selectedAccountId, count],
+    queryFn: async () => {
+      const params = new URLSearchParams({ count });
+      if (selectedAccountId !== "all") params.set("instagramAccountId", selectedAccountId);
+      const response = await fetch(`/api/instagram/overview?${params}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) {
+        throw new Error(payload.error ?? "Failed to load overview");
+      }
+      return payload.data as OverviewResponse;
+    },
+  });
 
   function handleAccountChange(accountId: string) {
-    setLoading(true);
     setSelectedAccountId(accountId);
   }
 
   function handleCountChange(next: string) {
-    setLoading(true);
     setCount(next);
   }
 
@@ -88,10 +76,11 @@ export default function OverviewPage() {
   }
 
   if (error) {
+    const message = error instanceof Error ? error.message : "Failed to load overview";
     return (
       <div className="panel rounded p-8 text-center">
-        <p className="text-sm text-error">{error === "Failed to load overview" ? t("Failed to load overview") : error}</p>
-        {error.includes("connect") && (
+        <p className="text-sm text-error">{message === "Failed to load overview" ? t("Failed to load overview") : message}</p>
+        {message.includes("connect") && (
           <a
             href="/api/instagram/connect"
             className="mt-4 inline-block text-sm text-accent hover:underline"
@@ -198,12 +187,14 @@ export default function OverviewPage() {
           // Eight metric columns can't compress into a phone; let the table keep
           // its natural width and scroll inside the panel instead.
           <div className="-mx-4 overflow-x-auto px-4 sm:mx-0 sm:px-0">
-            <table className="w-full min-w-[720px] text-sm">
+            <table className="w-full min-w-[960px] text-sm">
               <thead>
                 <tr className="text-left text-xs uppercase tracking-wide text-zinc-500 border-b border-border">
                   <th className="py-2 pr-4 font-medium">{t("Post")}</th>
                   <th className="py-2 px-3 font-medium text-right">{t("Views")}</th>
                   <th className="py-2 px-3 font-medium text-right">{t("Reach")}</th>
+                  <th className="py-2 px-3 font-medium text-right">{t("Followers gained")}</th>
+                  <th className="py-2 px-3 font-medium text-right">{t("Emails collected")}</th>
                   <th className="py-2 px-3 font-medium text-right">{t("Likes")}</th>
                   <th className="py-2 px-3 font-medium text-right">{t("Comments")}</th>
                   <th className="py-2 px-3 font-medium text-right">{t("Saved")}</th>
@@ -238,6 +229,12 @@ export default function OverviewPage() {
                     </td>
                     <td className="py-3 px-3 text-right text-muted">
                       {formatNumber(p.reach, locale)}
+                    </td>
+                    <td className="py-3 px-3 text-right text-muted">
+                      {formatNumber(p.followersGained, locale)}
+                    </td>
+                    <td className="py-3 px-3 text-right text-muted">
+                      {p.emailCaptures.toLocaleString(locale)}
                     </td>
                     <td className="py-3 px-3 text-right text-muted">
                       {formatNumber(p.likes, locale)}

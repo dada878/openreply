@@ -38,6 +38,7 @@ export interface WebhookCommentEvent {
   commentText: string;
   commenterId: string;
   commenterName?: string;
+  commenterDisplayName?: string;
   mediaId: string;
   /**
    * Set only when the comment was left on an ad: the id of the organic post
@@ -59,6 +60,7 @@ interface WebhookEntry {
       from?: {
         id?: string;
         username?: string;
+        name?: string;
       };
       media?: {
         id?: string;
@@ -152,6 +154,7 @@ export function parseCommentEvents(payload: WebhookPayload): WebhookCommentEvent
         commentText: value.text ?? "",
         commenterId,
         commenterName: value.from?.username,
+        commenterDisplayName: value.from?.name,
         mediaId,
         originalMediaId,
       });

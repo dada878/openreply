@@ -4,13 +4,13 @@
    Plain and functional. No gradients, glass, glow, or animation. */
 
 @theme inline {
-  --color-background: #ffffff;
-  --color-foreground: #18181b;
-  --color-surface: #f7f7f8;
-  --color-surface-hover: #efeff1;
-  --color-border: #e4e4e7;
-  --color-border-hover: #d4d4d8;
-  --color-muted: #71717a;
+  --color-background: var(--app-background);
+  --color-foreground: var(--app-foreground);
+  --color-surface: var(--app-surface);
+  --color-surface-hover: var(--app-surface-hover);
+  --color-border: var(--app-border);
+  --color-border-hover: var(--app-border-hover);
+  --color-muted: var(--app-muted);
   --color-accent: #f97316;
   --color-accent-hover: #ea580c;
   --color-success: #16a34a;
@@ -20,8 +20,60 @@
   --font-mono: ui-monospace, monospace;
 }
 
+ :root {
+  --app-background: #f8fafc;
+  --app-foreground: #172033;
+  --app-surface: #ffffff;
+  --app-surface-hover: #eef2f7;
+  --app-border: #dbe2ea;
+  --app-border-hover: #c3cedb;
+  --app-muted: #637083;
+}
+
 html {
   color-scheme: light;
+  background: var(--app-background);
+}
+
+html[data-theme="dark"] {
+  color-scheme: dark;
+  --app-background: #10141b;
+  --app-foreground: #f1f5f9;
+  --app-surface: #191f28;
+  --app-surface-hover: #252d38;
+  --app-border: #344050;
+  --app-border-hover: #4c5a6c;
+  --app-muted: #a6b2c2;
+}
+
+html[data-theme="dark"] body {
+  background: var(--app-background);
+}
+
+html[data-theme="dark"] input,
+html[data-theme="dark"] textarea,
+html[data-theme="dark"] select,
+html[data-theme="dark"] option {
+  color-scheme: dark;
+}
+
+html[data-theme="dark"] .text-zinc-500,
+html[data-theme="dark"] .text-zinc-600 {
+  color: #a6b2c2;
+}
+
+html[data-theme="dark"] .bg-zinc-200,
+html[data-theme="dark"] .bg-zinc-300 {
+  background-color: #465363;
+}
+
+html[data-theme="dark"] .bg-white {
+  background-color: var(--app-surface);
+}
+
+html[data-theme="dark"] .text-zinc-900,
+html[data-theme="dark"] .text-zinc-950 {
+  color: #f1f5f9;
 }
 
 body {
@@ -97,6 +149,16 @@ select:focus-visible {
 }
 .zernio-sponsor { background: var(--color-zernio-cream); color: var(--color-zernio-charcoal); border-color: var(--color-zernio-border); }
 .zernio-action { background: var(--color-zernio-coral); color: white; }
+
+html[data-theme="dark"] .zernio-sponsor {
+  background: #202830;
+  color: #f1f5f9;
+  border-color: #435161;
+}
+
+html[data-theme="dark"] .zernio-sponsor .border-zernio-border {
+  border-color: #435161;
+}
 
 @font-face {
   font-family: 'Zernio Geist';

@@ -12,6 +12,12 @@ import {
 import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useMemo, useState } from "react";
 import { useRouter } from "next/navigation";
+import { useQueryClient } from "@tanstack/react-query";
+import {
+  appendMarketingTrackingParams,
+  MARKETING_TRACKING_PARAMS,
+  type MarketingTrackingKey,
+} from "@/lib/tracking/marketing-params";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
@@ -21,6 +27,8 @@ import {
   IMPORT_ACCOUNT_KEY,
   type ImportRow,
 } from "@/lib/import-queue";
+import { Sparkles } from "lucide-react";
+import { PUBLIC_REPLY_AI_MODELS } from "@/lib/ai/public-reply";
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
@@ -30,6 +38,8 @@ interface LoadedCampaign {
   name: string;
   postId: string | null;
   postUrl: string | null;
+  trackingParamKeys: MarketingTrackingKey[];
+  trackingEventId: string | null;
   pendingNextReel: boolean;
   matchAnyPost: boolean;
   keywords: string[];
@@ -37,6 +47,7 @@ interface LoadedCampaign {
   dmTriggerEnabled: boolean;
   wholeWordMatch: boolean;
   dmMessage: string;
+  commentDmEnabled: boolean;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
   openingDmButtonLabel: string | null;
@@ -44,12 +55,21 @@ interface LoadedCampaign {
   requireFollow: boolean;
   followPromptMessage: string | null;
   followPromptButtonLabel: string | null;
+  followCheckFailedMessage: string | null;
+  collectEmail: boolean;
+  emailPromptMessage: string | null;
+  emailInvalidMessage: string | null;
   followUpEnabled: boolean;
   followUpMessage: string | null;
+  followUpDestinationUrl: string | null;
+  followUpButtonLabel: string | null;
   followUpDelayMinutes: number | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
+  aiPublicReplyEnabled: boolean;
+  aiPublicReplyPrompt: string | null;
+  aiPublicReplyModel: string | null;
   isActive: boolean;
   instagramAccountId: string;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
@@ -144,6 +164,7 @@ export default function CampaignBuilder({
 }: CampaignBuilderProps) {
   const { t } = useI18n();
   const router = useRouter();
+  const queryClient = useQueryClient();
   const initial = template?.config;
 
   const [loading, setLoading] = useState(mode === "edit");
@@ -173,9 +194,18 @@ export default function CampaignBuilder({
   const [keywordText, setKeywordText] = useState(initial?.keywords.join(", ") ?? "");
   const [wholeWordMatch, setWholeWordMatch] = useState(initial?.wholeWordMatch ?? true);
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(initial?.dmTriggerEnabled ?? false);
+  const [commentDmEnabled, setCommentDmEnabled] = useState(initial?.commentDmEnabled ?? true);
 
   const [publicReplyEnabled, setPublicReplyEnabled] = useState(initial?.publicReplyEnabled ?? false);
   const [publicReplyMessages, setPublicReplyMessages] = useState<string[]>(initial?.publicReplyMessages.length ? initial.publicReplyMessages : [""]);
+  const [aiPublicReplyEnabled, setAiPublicReplyEnabled] = useState(initial?.aiPublicReplyEnabled ?? false);
+  const [aiPublicReplyPrompt, setAiPublicReplyPrompt] = useState(initial?.aiPublicReplyPrompt ?? "");
+  const [aiPublicReplyModel, setAiPublicReplyModel] = useState(initial?.aiPublicReplyModel ?? "gpt-4o-mini");
+  const [aiTestCommenterName, setAiTestCommenterName] = useState("Dada");
+  const [aiTestComment, setAiTestComment] = useState("想了解更多，謝謝！");
+  const [aiTestResult, setAiTestResult] = useState<string | null>(null);
+  const [aiTestError, setAiTestError] = useState<string | null>(null);
+  const [aiTesting, setAiTesting] = useState(false);
 
   const [openingDmEnabled, setOpeningDmEnabled] = useState(initial?.openingDmEnabled ?? false);
   const [openingDmMessage, setOpeningDmMessage] = useState(initial?.openingDmMessage ?? "");
@@ -188,12 +218,33 @@ export default function CampaignBuilder({
   const [secondLinkOpen, setSecondLinkOpen] = useState(Boolean(initial?.secondaryDestinationUrl));
   const [secondaryDestinationUrl, setSecondaryDestinationUrl] = useState(initial?.secondaryDestinationUrl ?? "");
   const [secondaryButtonLabel, setSecondaryButtonLabel] = useState(initial?.secondaryButtonLabel ?? "Open link");
+  const [trackingParamKeys, setTrackingParamKeys] = useState<MarketingTrackingKey[]>(initial?.trackingParamKeys ?? []);
+  const [trackingEventId, setTrackingEventId] = useState(initial?.trackingEventId ?? "");
   const [requireFollow, setRequireFollow] = useState(initial?.requireFollow ?? false);
   const [followPromptMessage, setFollowPromptMessage] = useState(initial?.followPromptMessage ?? "");
   const [followPromptButtonLabel, setFollowPromptButtonLabel] =
     useState(initial?.followPromptButtonLabel ?? "i'm following");
+  const [followCheckFailedMessage, setFollowCheckFailedMessage] = useState(
+    initial?.followCheckFailedMessage ?? "看起來你還沒有追蹤帳號。追蹤後，再點一次按鈕。"
+  );
+  const [collectEmail, setCollectEmail] = useState(initial?.collectEmail ?? false);
+  const [emailPromptMessage, setEmailPromptMessage] = useState(
+    initial?.emailPromptMessage ?? "請直接回覆你的 Email，我就把內容傳給你。"
+  );
+  const [emailInvalidMessage, setEmailInvalidMessage] = useState(
+    initial?.emailInvalidMessage ?? "請輸入有效的 Email。"
+  );
   const [followUpEnabled, setFollowUpEnabled] = useState(initial?.followUpEnabled ?? false);
   const [followUpMessage, setFollowUpMessage] = useState(initial?.followUpMessage ?? "");
+  const [followUpLinkOpen, setFollowUpLinkOpen] = useState(
+    Boolean(initial?.followUpDestinationUrl)
+  );
+  const [followUpDestinationUrl, setFollowUpDestinationUrl] = useState(
+    initial?.followUpDestinationUrl ?? ""
+  );
+  const [followUpButtonLabel, setFollowUpButtonLabel] = useState(
+    initial?.followUpButtonLabel ?? "Open link"
+  );
   const [followUpDelayMinutes, setFollowUpDelayMinutes] = useState(initial?.followUpDelayMinutes ?? 0);
 
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
@@ -211,6 +262,19 @@ export default function CampaignBuilder({
         .filter(Boolean),
     [keywordText]
   );
+
+  const trackingPreviewUrl = useMemo(() => {
+    if (!trackedDestinationUrl.trim() || trackingParamKeys.length === 0) return null;
+    return appendMarketingTrackingParams(trackedDestinationUrl.trim(), {
+      keys: trackingParamKeys,
+      accountName: "your-account",
+      accountId: "account-id",
+      campaignId: "campaign-id",
+      eventId: trackingEventId.trim() || "event-id",
+      videoId: "media-id",
+      commenterId: "commenter-id",
+    });
+  }, [trackedDestinationUrl, trackingParamKeys, trackingEventId]);
 
   // Fetch the connected account's real avatar for the preview (cache-first so
   // it shows instantly on a return visit instead of a blank circle).
@@ -272,9 +336,12 @@ export default function CampaignBuilder({
         );
         setPostId(c.postId);
         setPostUrl(c.postUrl);
+        setTrackingParamKeys(c.trackingParamKeys ?? []);
+        setTrackingEventId(c.trackingEventId ?? "");
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setCommentDmEnabled(c.commentDmEnabled ?? true);
         setWholeWordMatch(c.wholeWordMatch ?? true);
         setPublicReplyEnabled(c.publicReplyEnabled);
         setPublicReplyMessages(
@@ -284,6 +351,9 @@ export default function CampaignBuilder({
               ? [c.publicReplyMessage]
               : [""]
         );
+        setAiPublicReplyEnabled(c.aiPublicReplyEnabled ?? false);
+        setAiPublicReplyPrompt(c.aiPublicReplyPrompt ?? "");
+        setAiPublicReplyModel(c.aiPublicReplyModel ?? "gpt-4o-mini");
         setOpeningDmEnabled(c.openingDmEnabled);
         setOpeningDmMessage(c.openingDmMessage ?? "");
         setOpeningDmButtonLabel(c.openingDmButtonLabel ?? "");
@@ -302,8 +372,19 @@ export default function CampaignBuilder({
         setFollowPromptButtonLabel(
           c.followPromptButtonLabel ?? "i'm following"
         );
+        setFollowCheckFailedMessage(
+          c.followCheckFailedMessage ?? "看起來你還沒有追蹤帳號。追蹤後，再點一次按鈕。"
+        );
+        setCollectEmail(c.collectEmail ?? false);
+        setEmailPromptMessage(
+          c.emailPromptMessage ?? "請直接回覆你的 Email，我就把內容傳給你。"
+        );
+        setEmailInvalidMessage(c.emailInvalidMessage ?? "請輸入有效的 Email。");
         setFollowUpEnabled(c.followUpEnabled ?? false);
         setFollowUpMessage(c.followUpMessage ?? "");
+        setFollowUpLinkOpen(Boolean(c.followUpDestinationUrl));
+        setFollowUpDestinationUrl(c.followUpDestinationUrl ?? "");
+        setFollowUpButtonLabel(c.followUpButtonLabel ?? "Open link");
         setFollowUpDelayMinutes(c.followUpDelayMinutes ?? 0);
       })
       .catch(() => setNotFound(true))
@@ -408,21 +489,33 @@ export default function CampaignBuilder({
       matchAnyWord: matchMode === "any",
       wholeWordMatch,
       dmTriggerEnabled,
+      commentDmEnabled,
       dmMessage,
       openingDmEnabled,
       openingDmMessage,
       openingDmButtonLabel,
       publicReplyEnabled,
       publicReplyMessages,
+      aiPublicReplyEnabled,
+      aiPublicReplyPrompt,
+      aiPublicReplyModel,
       trackedDestinationUrl: trackedDestinationUrl.trim(),
+      trackingParamKeys,
+      trackingEventId: trackingEventId.trim(),
       linkButtonLabel,
       secondaryDestinationUrl: secondaryDestinationUrl.trim(),
       secondaryButtonLabel,
       requireFollow,
       followPromptMessage,
       followPromptButtonLabel,
+      followCheckFailedMessage,
+      collectEmail,
+      emailPromptMessage,
+      emailInvalidMessage,
       followUpEnabled,
       followUpMessage,
+      followUpDestinationUrl,
+      followUpButtonLabel,
       followUpDelayMinutes,
     };
   }
@@ -461,7 +554,12 @@ export default function CampaignBuilder({
       return setError(t("Pick a post or reel to trigger the campaign."));
     if (matchMode === "specific" && keywords.length === 0)
       return setError(t("Add at least one keyword, or switch to any word."));
-    if (!dmMessage.trim()) return setError(t("Add the DM with the link."));
+    if ((commentDmEnabled || dmTriggerEnabled) && !dmMessage.trim()) {
+      return setError(t("Add the DM with the link."));
+    }
+    if (aiPublicReplyEnabled && !aiPublicReplyPrompt.trim()) {
+      return setError(t("Add an AI instruction for the public reply."));
+    }
     if (openingDmEnabled && (!openingDmMessage.trim() || !openingDmButtonLabel.trim()))
       return setError(t("Your opening DM needs a message and a button label."));
 
@@ -479,6 +577,7 @@ export default function CampaignBuilder({
       dmTriggerEnabled,
       wholeWordMatch,
       dmMessage,
+      commentDmEnabled,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled ? openingDmMessage : null,
       openingDmButtonLabel: openingDmEnabled ? openingDmButtonLabel : null,
@@ -486,7 +585,14 @@ export default function CampaignBuilder({
       publicReplyMessages: publicReplyEnabled
         ? publicReplyMessages.map((m) => m.trim()).filter(Boolean)
         : [],
+      aiPublicReplyEnabled: publicReplyEnabled && aiPublicReplyEnabled,
+      aiPublicReplyPrompt:
+        publicReplyEnabled && aiPublicReplyEnabled ? aiPublicReplyPrompt.trim() : "",
+      aiPublicReplyModel:
+        publicReplyEnabled && aiPublicReplyEnabled ? aiPublicReplyModel : "",
       trackedDestinationUrl: trackedDestinationUrl.trim() || "",
+      trackingParamKeys,
+      trackingEventId: trackingEventId.trim() || "",
       linkButtonLabel: linkButtonLabel.trim() || "Open link",
       secondaryDestinationUrl: secondaryDestinationUrl.trim() || "",
       secondaryButtonLabel: secondaryButtonLabel.trim() || "Open link",
@@ -495,8 +601,20 @@ export default function CampaignBuilder({
       followPromptButtonLabel: requireFollow
         ? followPromptButtonLabel.trim() || "i'm following"
         : "",
+      followCheckFailedMessage: requireFollow ? followCheckFailedMessage.trim() : "",
+      collectEmail,
+      emailPromptMessage: collectEmail ? emailPromptMessage.trim() : "",
+      emailInvalidMessage: collectEmail ? emailInvalidMessage.trim() : "",
       followUpEnabled,
       followUpMessage: followUpEnabled ? followUpMessage.trim() : "",
+      followUpDestinationUrl:
+        followUpEnabled && followUpLinkOpen
+          ? followUpDestinationUrl.trim()
+          : "",
+      followUpButtonLabel:
+        followUpEnabled && followUpLinkOpen
+          ? followUpButtonLabel.trim() || "Open link"
+          : "",
       followUpDelayMinutes: followUpEnabled ? followUpDelayMinutes : 0,
       isActive: activeValue,
     };
@@ -516,6 +634,12 @@ export default function CampaignBuilder({
             });
       const data = await res.json();
       if (data.success) {
+        // The campaign list is backed by React Query and can stay mounted in
+        // the shared client while this editor is open. Mark every account
+        // filter stale before navigating so returning to the list always
+        // reads the saved campaign from the server instead of a pre-edit
+        // cache entry.
+        await queryClient.invalidateQueries({ queryKey: ["automations"] });
         // The post we just assigned is now in use. Reflect it immediately so
         // the picker flags it on the next imported row — the fetch that builds
         // this map doesn't re-run while the builder stays mounted through the
@@ -601,6 +725,36 @@ export default function CampaignBuilder({
     }
     router.push("/campaigns");
     router.refresh();
+  }
+
+  async function testAiPublicReply() {
+    setAiTesting(true);
+    setAiTestResult(null);
+    setAiTestError(null);
+    try {
+      const response = await fetch("/api/ai/public-reply", {
+        method: "POST",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({
+          prompt: aiPublicReplyPrompt.trim(),
+          model: aiPublicReplyModel,
+          username: aiTestCommenterName.trim() || "commenter",
+          displayName: aiTestCommenterName.trim() || "留言者",
+          commentText: aiTestComment.trim(),
+          accountUsername: username,
+          existingReply: publicReplyMessages.find((message) => message.trim())?.trim() || "謝謝你的留言！",
+        }),
+      });
+      const payload = await response.json().catch(() => null);
+      if (!response.ok || !payload?.success) {
+        throw new Error(payload?.error ?? t("AI test failed"));
+      }
+      setAiTestResult(payload.data.reply);
+    } catch (error) {
+      setAiTestError(error instanceof Error ? error.message : t("AI test failed"));
+    } finally {
+      setAiTesting(false);
+    }
   }
 
   if (loading) {
@@ -831,6 +985,21 @@ export default function CampaignBuilder({
             />
           </div>
           {publicReplyEnabled && (
+            <div className="rounded-lg border border-border bg-surface/60 px-3 py-2.5">
+              <div className="flex items-center justify-between gap-3">
+                <div>
+                  <span className="text-sm text-foreground">留言後傳送私訊</span>
+                  {!commentDmEnabled && <p className="mt-1 text-xs text-muted">只回覆留言；AI 公開回覆仍會正常運作。</p>}
+                </div>
+                <Toggle
+                  label="留言後傳送私訊"
+                  on={commentDmEnabled}
+                  onToggle={() => setCommentDmEnabled(!commentDmEnabled)}
+                />
+              </div>
+            </div>
+          )}
+          {publicReplyEnabled && (
             <div className="space-y-2">
               {publicReplyMessages.map((msg, i) => (
                 <div key={i} className="flex items-center gap-2">
@@ -875,11 +1044,88 @@ export default function CampaignBuilder({
               <p className="text-xs text-muted">
                 {t("One is picked at random each time, so replies don't look identical.")}
               </p>
+              <div className="rounded-lg border border-accent/30 bg-accent/5 p-3">
+                <div className="flex items-center justify-between gap-3">
+                  <div className="flex items-center gap-2 text-sm font-medium text-foreground">
+                    <Sparkles className="h-4 w-4 text-accent" aria-hidden="true" />
+                    <span>{t("Generate the public reply with AI")}</span>
+                  </div>
+                  <Toggle
+                    label={t("Generate the public reply with AI")}
+                    on={aiPublicReplyEnabled}
+                    onToggle={() => setAiPublicReplyEnabled(!aiPublicReplyEnabled)}
+                  />
+                </div>
+                {aiPublicReplyEnabled && (
+                  <div className="mt-3 space-y-2">
+                    <textarea
+                      value={aiPublicReplyPrompt}
+                      onChange={(e) => setAiPublicReplyPrompt(e.target.value)}
+                      placeholder={t("Write how the AI should reply to comments…")}
+                      rows={4}
+                      maxLength={2000}
+                      className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    />
+                    <label className="flex items-center gap-3 text-sm text-foreground">
+                      <span className="shrink-0 text-muted">AI 模型</span>
+                      <select
+                        value={aiPublicReplyModel}
+                        onChange={(event) => setAiPublicReplyModel(event.target.value)}
+                        className="min-w-44 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                      >
+                        {PUBLIC_REPLY_AI_MODELS.map((model) => (
+                          <option key={model.value} value={model.value}>{model.label}</option>
+                        ))}
+                      </select>
+                    </label>
+                    <div className="rounded-lg border border-border bg-surface/60 p-3">
+                      <p className="text-xs font-medium text-foreground">測試 AI 公開回覆</p>
+                      <div className="mt-2 grid gap-2 sm:grid-cols-2">
+                        <input
+                          value={aiTestCommenterName}
+                          onChange={(event) => setAiTestCommenterName(event.target.value)}
+                          placeholder="留言者名稱"
+                          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                        />
+                        <input
+                          value={aiTestComment}
+                          onChange={(event) => setAiTestComment(event.target.value)}
+                          placeholder="輸入一則測試留言"
+                          className="rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                        />
+                      </div>
+                      <div className="mt-2 flex flex-wrap items-center gap-3">
+                        <button
+                          type="button"
+                          onClick={() => void testAiPublicReply()}
+                          disabled={aiTesting || !aiPublicReplyPrompt.trim()}
+                          className="rounded-lg border border-accent/40 px-3 py-2 text-sm font-medium text-accent hover:bg-accent/10 disabled:cursor-not-allowed disabled:opacity-50"
+                        >
+                          {aiTesting ? "生成中…" : "測試生成回覆"}
+                        </button>
+                        {aiTestResult && <p className="text-sm text-foreground">{aiTestResult}</p>}
+                        {aiTestError && <p className="text-sm text-error">{aiTestError}</p>}
+                      </div>
+                    </div>
+                    <p className="text-xs leading-5 text-muted">
+                      {t(
+                        "Available variables: {username}, {display_name}, {comment}, {account_name}. Your saved reply is used if AI is unavailable.",
+                        {
+                          username: "{username}",
+                          display_name: "{display_name}",
+                          comment: "{comment}",
+                          account_name: "{account_name}",
+                        },
+                      )}
+                    </p>
+                  </div>
+                )}
+              </div>
             </div>
           )}
         </Section>
 
-        <Section title={t("They will get")}>
+        {commentDmEnabled && <Section title={t("They will get")}>
           <div className="rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">{t("an opening DM")}</span>
@@ -937,15 +1183,68 @@ export default function CampaignBuilder({
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   maxLength={20}
                 />
+                <label className="block space-y-1.5">
+                  <span className="text-xs text-muted">
+                    {t("Not-following reply")}
+                  </span>
+                  <textarea
+                    value={followCheckFailedMessage}
+                    onChange={(e) => setFollowCheckFailedMessage(e.target.value)}
+                    placeholder={t("It looks like you haven't followed yet. Follow the account, then tap the button again.")}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={1000}
+                  />
+                </label>
                 <p className="text-xs text-muted">
                   {t("We send the link only after they tap the button and Instagram confirms the follow. If it can't be verified, we send it anyway.")}
                 </p>
               </div>
             )}
           </div>
-        </Section>
+          <div className="mt-3 rounded-lg border border-border p-3">
+            <div className="flex items-center justify-between">
+              <span className="text-sm text-foreground">
+                {t("collect an email before sending the content")}
+              </span>
+              <Toggle
+                label={t("collect an email before sending the content")}
+                on={collectEmail}
+                onToggle={() => setCollectEmail(!collectEmail)}
+              />
+            </div>
+            {collectEmail && (
+              <div className="mt-3 space-y-2">
+                <textarea
+                  value={emailPromptMessage}
+                  onChange={(e) => setEmailPromptMessage(e.target.value)}
+                  placeholder={t("Reply with your email and I’ll send the content over.")}
+                  rows={3}
+                  className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                  maxLength={1000}
+                />
+                <label className="block space-y-1.5">
+                  <span className="text-xs text-muted">
+                    {t("Invalid email reply")}
+                  </span>
+                  <textarea
+                    value={emailInvalidMessage}
+                    onChange={(e) => setEmailInvalidMessage(e.target.value)}
+                    placeholder={t("Please enter a valid email address.")}
+                    rows={2}
+                    className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
+                    maxLength={1000}
+                  />
+                </label>
+                <p className="text-xs text-muted">
+                  {t("They must reply with a valid email before the content is sent.")}
+                </p>
+              </div>
+            )}
+          </div>
+        </Section>}
 
-        <Section title={t("And then, they will get")}>
+        {(commentDmEnabled || dmTriggerEnabled) && <Section title={t("And then, they will get")}>
           <div className="rounded-lg border border-border p-3 space-y-2">
             <span className="text-sm text-foreground">{t("a DM with a link")}</span>
             <textarea
@@ -1011,6 +1310,58 @@ export default function CampaignBuilder({
               {"{link}"} {t("inserts the tracked link;")} {"{username}"} {t("personalizes.")}
             </p>
           </div>
+          {linkOpen && (
+            <div className="rounded-lg border border-border bg-surface/60 p-3">
+              <p className="text-sm font-medium text-foreground">行銷追蹤參數</p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                勾選後，使用者點擊導流連結時，這些值會以 <code>or_</code> 參數附加到你的網址。
+              </p>
+              <p className="mt-1 text-xs leading-5 text-muted">
+                Instagram 帳號名稱與 ID 會自動帶入上方選取的 Meta／Instagram 連線；活動與貼文資料也會由 OpenReply 自動代入。
+              </p>
+              <div className="mt-3 grid gap-2 sm:grid-cols-2">
+                {MARKETING_TRACKING_PARAMS.map((item) => {
+                  const checked = trackingParamKeys.includes(item.key);
+                  return (
+                    <label key={item.key} className="flex cursor-pointer items-start gap-2 rounded border border-border px-2.5 py-2 text-sm text-foreground hover:bg-surface-hover">
+                      <input
+                        type="checkbox"
+                        checked={checked}
+                        onChange={() => setTrackingParamKeys((current) => checked ? current.filter((key) => key !== item.key) : [...current, item.key])}
+                        className="mt-0.5 accent-[var(--color-accent)]"
+                      />
+                      <span>{item.label}</span>
+                    </label>
+                  );
+                })}
+              </div>
+              {trackingParamKeys.includes("event_id") && (
+                <input
+                  value={trackingEventId}
+                  onChange={(event) => setTrackingEventId(event.target.value)}
+                  placeholder="事件 ID（例如 launch-2026-09）"
+                  maxLength={120}
+                  className="mt-3 w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-muted focus:border-accent/40 focus:outline-none"
+                />
+              )}
+              <p className="mt-2 text-xs text-muted">
+                留言者 ID 可協助你辨識個別使用者，請只在你的追蹤與隱私規範允許時啟用。
+              </p>
+              {trackingPreviewUrl && (
+                <div className="mt-3 border-t border-border pt-3 text-xs text-muted">
+                  <span className="font-medium">預覽連結（示意值）</span>
+                  <a
+                    href={trackingPreviewUrl}
+                    target="_blank"
+                    rel="noopener noreferrer"
+                    className="mt-1 block break-all underline decoration-dotted underline-offset-2 hover:text-foreground"
+                  >
+                    {trackingPreviewUrl}
+                  </a>
+                </div>
+              )}
+            </div>
+          )}
           <div className="mt-3 rounded-lg border border-border p-3">
             <div className="flex items-center justify-between">
               <span className="text-sm text-foreground">
@@ -1032,6 +1383,31 @@ export default function CampaignBuilder({
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />
+                {followUpLinkOpen ? (
+                  <div className="space-y-2">
+                    <input
+                      value={followUpDestinationUrl}
+                      onChange={(e) => setFollowUpDestinationUrl(e.target.value)}
+                      placeholder="https://yourlink.com/offer"
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    />
+                    <input
+                      value={followUpButtonLabel}
+                      onChange={(e) => setFollowUpButtonLabel(e.target.value)}
+                      placeholder={t("Button label (e.g. Open link)")}
+                      maxLength={20}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    />
+                  </div>
+                ) : (
+                  <button
+                    type="button"
+                    onClick={() => setFollowUpLinkOpen(true)}
+                    className="w-full rounded-lg border border-border py-2 text-sm text-muted hover:text-foreground"
+                  >
+                    {t("+ Add A Link")}
+                  </button>
+                )}
                 <div className="flex flex-wrap items-center gap-2 text-sm text-foreground">
                   <span className="text-xs text-muted">{t("Send it")}</span>
                   <input
@@ -1059,7 +1435,7 @@ export default function CampaignBuilder({
               </div>
             )}
           </div>
-        </Section>
+        </Section>}
       </div>
 
       {/* Right: preview */}
@@ -1091,8 +1467,12 @@ export default function CampaignBuilder({
             requireFollow={requireFollow}
             followPromptMessage={followPromptMessage}
             followPromptButtonLabel={followPromptButtonLabel || "i'm following"}
+            collectEmail={collectEmail}
+            emailPromptMessage={emailPromptMessage}
             followUpEnabled={followUpEnabled}
             followUpMessage={followUpMessage}
+            followUpDestinationUrl={followUpLinkOpen ? followUpDestinationUrl : undefined}
+            followUpButtonLabel={followUpButtonLabel || "Open link"}
             followUpDelayMinutes={followUpDelayMinutes}
           />
         </div>

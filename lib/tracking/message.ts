@@ -2,6 +2,7 @@ export interface MessageTrackedLink {
   slug: string;
   destinationUrl: string;
 }
+import { appendMarketingTrackingParams, type MarketingTrackingContext } from "@/lib/tracking/marketing-params";
 
 const URL_PATTERN = /https?:\/\/[^\s<>"')\]]+/i;
 
@@ -51,14 +52,18 @@ export function renderMessageWithoutLink({
     .trim();
 }
 
-export function buildTrackedUrl(slug: string, baseUrl?: string) {
+export function buildTrackedUrl(
+  slug: string,
+  baseUrl?: string,
+  tracking?: MarketingTrackingContext,
+) {
   const resolvedBaseUrl =
     baseUrl ??
     (typeof window !== "undefined"
       ? window.location.origin
       : process.env.NEXTAUTH_URL ?? "http://localhost:3000");
 
-  return `${resolvedBaseUrl.replace(/\/$/, "")}/r/${slug}`;
+  return appendMarketingTrackingParams(`${resolvedBaseUrl.replace(/\/$/, "")}/r/${slug}`, tracking);
 }
 
 export function renderMessageWithTracking({
@@ -66,18 +71,20 @@ export function renderMessageWithTracking({
   commenterName,
   trackedLinks,
   baseUrl,
+  tracking,
 }: {
   message: string;
   commenterName?: string | null;
   trackedLinks?: MessageTrackedLink[];
   baseUrl?: string;
+  tracking?: MarketingTrackingContext;
 }) {
   let rendered = message.replace(/\{username\}/gi, commenterName ?? "there");
   const primaryLink = trackedLinks?.[0];
 
   if (!primaryLink) return rendered;
 
-  const trackedUrl = buildTrackedUrl(primaryLink.slug, baseUrl);
+  const trackedUrl = buildTrackedUrl(primaryLink.slug, baseUrl, tracking);
 
   if (/\{link\}/i.test(rendered)) {
     return rendered.replace(/\{link\}/gi, trackedUrl);

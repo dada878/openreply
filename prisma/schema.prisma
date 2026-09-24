@@ -76,12 +76,15 @@ model Workspace {
   dmsSentThisPeriod Int      @default(0)
 
   zernioConnection  ZernioConnection?
+  aiConnection      AiConnection?
   members           WorkspaceMember[]
   invitations       WorkspaceInvitation[]
   instagramAccounts InstagramAccount[]
   automations       Automation[]
   campaignTemplates CampaignTemplate[]
   dmLogs            DmLog[]
+  emailCaptures     EmailCapture[]
+  followConversions  FollowConversion[]
   trackedLinks      TrackedLink[]
   linkClicks        LinkClick[]
   webhookEvents     WebhookEvent[]
@@ -101,6 +104,16 @@ model CampaignTemplate {
   workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 
   @@index([workspaceId, updatedAt])
+}
+
+model AiConnection {
+  workspaceId  String   @id
+  apiKey       String
+  defaultModel String?
+  createdAt    DateTime @default(now())
+  updatedAt    DateTime @updatedAt
+
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
 }
 
 model WorkspaceMember {
@@ -156,6 +169,8 @@ model InstagramAccount {
   workspace   Workspace    @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   automations Automation[]
   dmLogs      DmLog[]
+  emailCaptures EmailCapture[]
+  followConversions FollowConversion[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
 
@@ -191,6 +206,8 @@ model Automation {
   goal           String?
   postId         String?
   postUrl        String?
+  trackingParamKeys String[] @default([])
+  trackingEventId String?
   pendingNextReel Boolean @default(false)
   matchAnyPost   Boolean @default(false)
   keywords       String[]
@@ -200,6 +217,13 @@ model Automation {
   // postId / matchAnyPost do not apply to it.
   dmTriggerEnabled Boolean @default(false)
   dmMessage      String
+  /// Send a private reply for comments that match this campaign. Existing
+  /// campaigns keep the historical behavior through the true default.
+  commentDmEnabled Boolean @default(true)
+  /// Generate the public comment reply with the configured AI prompt.
+  aiPublicReplyEnabled Boolean @default(false)
+  aiPublicReplyPrompt  String?
+  aiPublicReplyModel   String?
   openingDmEnabled     Boolean @default(false)
   openingDmMessage     String?
   openingDmButtonLabel String?
@@ -207,8 +231,16 @@ model Automation {
   requireFollow           Boolean @default(false)
   followPromptMessage     String?
   followPromptButtonLabel String?
+  followCheckFailedMessage String?
+  // Ask for a verified email reply before the campaign reveal is delivered.
+  // The email itself lives in EmailCapture, never in DmLog or worker errors.
+  collectEmail       Boolean @default(false)
+  emailPromptMessage String?
+  emailInvalidMessage String?
   followUpEnabled Boolean @default(false)
   followUpMessage String?
+  followUpDestinationUrl String?
+  followUpButtonLabel String?
   // Minutes to wait after the link is delivered before sending the follow-up.
   // 0 sends it right away.
   followUpDelayMinutes Int @default(0)
@@ -226,6 +258,8 @@ model Automation {
   workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
   dmLogs           DmLog[]
+  emailCaptures    EmailCapture[]
+  followConversions FollowConversion[]
   trackedLinks     TrackedLink[]
   linkClicks       LinkClick[]
 
@@ -270,6 +304,65 @@ model DmLog {
   @@index([automationId])
   @@index([instagramAccountId])
   @@index([status])
+}
+
+// One delivery record per campaign and Instagram user. A captured email can be
+// reused across campaigns on the same Instagram account, while prompt and
+// reveal claims remain campaign-specific so duplicate webhooks cannot ask
+// repeatedly or re-send the same protected content.
+model EmailCapture {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  automationId       String
+  instagramAccountId String
+  commenterId        String
+  commenterName      String?
+  email              String?
+  requestedAt        DateTime @default(now())
+  capturedAt         DateTime?
+  emailPromptClaimedAt            DateTime?
+  emailPromptSentAt               DateTime?
+  emailPromptDeliveryUnconfirmed Boolean  @default(false)
+  contentDeliveryClaimedAt        DateTime?
+  contentDeliveredAt              DateTime?
+  contentDeliveryUnconfirmed      Boolean  @default(false)
+  lastError                       String?
+  createdAt                       DateTime @default(now())
+  updatedAt                       DateTime @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, commenterId])
+  @@index([workspaceId, capturedAt])
+  @@index([instagramAccountId, commenterId])
+}
+
+// A verified follow that happened through a campaign's follow gate. This is
+// separate from Instagram's aggregate Insights so Overview can attribute the
+// conversion to the actual comment-trigger campaign and its post.
+model FollowConversion {
+  id                 String   @id @default(cuid())
+  workspaceId        String
+  automationId       String
+  instagramAccountId String
+  commenterId        String
+  commenterName      String?
+  /// The post whose comment started the follow gate. Null for DM-triggered campaigns.
+  sourcePostId       String?
+  followedAt         DateTime @default(now())
+  createdAt          DateTime @default(now())
+  updatedAt          DateTime @updatedAt
+
+  workspace        Workspace        @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  automation       Automation       @relation(fields: [automationId], references: [id], onDelete: Cascade)
+  instagramAccount InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+
+  @@unique([automationId, commenterId])
+  @@index([workspaceId, followedAt])
+  @@index([instagramAccountId, commenterId])
+  @@index([instagramAccountId, sourcePostId])
 }
 
 // Legacy reconciliation model; currently unwired. Runtime code does not read
@@ -387,6 +480,7 @@ enum DmStatus {
   SKIPPED_RATE_LIMIT
   SKIPPED_PLAN_LIMIT
   SKIPPED_NO_MATCH
+  SKIPPED_DM_DISABLED
 }
 
 enum WebhookStatus {

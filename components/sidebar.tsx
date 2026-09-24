@@ -3,25 +3,36 @@
 /**
  * Sidebar Navigation
  *
- * Text-only nav with active state and workspace section.
+ * Grouped navigation with icons, active state and workspace section.
  */
 
-import LanguageSwitcher from "@/components/language-switcher";
 import { useI18n } from "@/lib/i18n/provider";
 import Link from "next/link";
 import Image from "next/image";
 import { zernioLink } from "@/lib/zernio-links";
 import { usePathname } from "next/navigation";
+import {
+  Activity,
+  ChartNoAxesCombined,
+  ContactRound,
+  FileStack,
+  Inbox,
+  LayoutDashboard,
+  ListChecks,
+  Megaphone,
+  Settings,
+} from "lucide-react";
 
 const navItems = [
-  { label: "Dashboard", href: "/dashboard" },
-  { label: "Overview", href: "/overview" },
-  { label: "Inbox", href: "/inbox" },
-  { label: "Campaigns", href: "/campaigns" },
-  { label: "My templates", href: "/campaign-templates" },
-  { label: "DM Logs", href: "/logs" },
-  { label: "Settings", href: "/settings" },
-  { label: "Diagnostics", href: "/diagnostics" },
+  { label: "Dashboard", href: "/dashboard", group: "Workspace", icon: LayoutDashboard },
+  { label: "Overview", href: "/overview", group: "Workspace", icon: ChartNoAxesCombined },
+  { label: "Inbox", href: "/inbox", group: "Workspace", icon: Inbox },
+  { label: "Campaigns", href: "/campaigns", group: "Automations", icon: Megaphone },
+  { label: "My templates", href: "/campaign-templates", group: "Automations", icon: FileStack },
+  { label: "DM Logs", href: "/logs", group: "Automations", icon: ListChecks },
+  { label: "Contacts", href: "/contacts", group: "Audience", icon: ContactRound },
+  { label: "Settings", href: "/settings", group: "System", icon: Settings },
+  { label: "Diagnostics", href: "/diagnostics", group: "System", icon: Activity },
 ] as const;
 
 interface SidebarProps {
@@ -62,38 +73,54 @@ export default function Sidebar({
           className="px-6 py-5 border-b border-border"
           style={{ paddingTop: "calc(1.25rem + env(safe-area-inset-top))" }}
         >
-          <Link href="/dashboard" className="text-base font-semibold">
-            OpenReply
+          <Link href="/dashboard" className="inline-flex items-center gap-2.5 text-base font-semibold" aria-label="OpenReply 首頁">
+            <Image
+              src="/icon-192.png"
+              alt=""
+              width={30}
+              height={30}
+              priority
+              className="h-7 w-7 rounded-lg"
+            />
+            <span>OpenReply</span>
           </Link>
         </div>
 
-        <nav className="flex-1 px-3 py-4 space-y-1 overflow-y-auto">
-          {navItems.map((item) => {
-            const isActive =
-              pathname === item.href || pathname.startsWith(item.href + "/");
-            return (
-              <Link
-                key={item.href}
-                href={item.href}
-                onClick={onClose}
-                aria-current={isActive ? "page" : undefined}
-                className={`
-                  block px-3 py-2.5 rounded text-sm
-                  ${
-                    isActive
-                      ? "bg-surface-hover text-foreground font-medium"
-                      : "text-muted hover:text-foreground hover:bg-surface-hover"
-                  }
-                `}
-              >
-                {t(item.label)}
-              </Link>
-            );
-          })}
+        <nav className="flex-1 space-y-5 overflow-y-auto px-3 py-4">
+          {Array.from(new Set(navItems.map((item) => item.group))).map((group) => (
+            <div key={group} className="space-y-1">
+              <p className="px-3 pb-1 text-[11px] font-medium uppercase tracking-[0.08em] text-muted">
+                {t(group)}
+              </p>
+              {navItems.filter((item) => item.group === group).map((item) => {
+                const isActive =
+                  pathname === item.href || pathname.startsWith(item.href + "/");
+                const Icon = item.icon;
+                return (
+                  <Link
+                    key={item.href}
+                    href={item.href}
+                    onClick={onClose}
+                    aria-current={isActive ? "page" : undefined}
+                    className={`
+                      flex items-center gap-3 rounded px-3 py-2.5 text-sm
+                      ${
+                        isActive
+                          ? "bg-surface-hover text-foreground font-medium"
+                          : "text-muted hover:text-foreground hover:bg-surface-hover"
+                      }
+                    `}
+                  >
+                    <Icon aria-hidden="true" className="h-4 w-4 shrink-0" strokeWidth={1.8} />
+                    {t(item.label)}
+                  </Link>
+                );
+              })}
+            </div>
+          ))}
         </nav>
 
         <div className="px-5 py-4 border-t border-border">
-          <div className="mb-4"><LanguageSwitcher /></div>
           <p className="text-sm text-foreground truncate">{workspaceName}</p>
           <p className="text-xs text-muted">{t("Self-hosted")}</p>
           <a

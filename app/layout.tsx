@@ -43,12 +43,17 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="h-full dark">
+    <html lang="en" className="h-full" suppressHydrationWarning>
       <body
         className="min-h-full bg-background text-foreground font-sans antialiased"
         // Clears the home indicator when installed; 0 everywhere else.
         style={{ paddingBottom: "env(safe-area-inset-bottom)" }}
       >
+        <script
+          dangerouslySetInnerHTML={{
+            __html: `(() => { try { const saved = localStorage.getItem("openreply-theme"); const system = window.matchMedia("(prefers-color-scheme: dark)").matches; const theme = saved === "dark" || (!saved && system) ? "dark" : "light"; document.documentElement.dataset.theme = theme; document.documentElement.style.colorScheme = theme; } catch {} })();`,
+          }}
+        />
         {children}
         <Analytics />
       </body>

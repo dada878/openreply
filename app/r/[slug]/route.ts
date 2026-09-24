@@ -39,5 +39,9 @@ export async function GET(request: NextRequest, { params }: RedirectRouteProps) 
     },
   });
 
-  return NextResponse.redirect(trackedLink.destinationUrl, { status: 302 });
+  const destination = new URL(trackedLink.destinationUrl);
+  for (const [key, value] of request.nextUrl?.searchParams ?? new URLSearchParams()) {
+    if (key.startsWith("or_") && value) destination.searchParams.set(key, value);
+  }
+  return NextResponse.redirect(destination, { status: 302 });
 }

@@ -130,6 +130,26 @@ describe("matchKeywords — non-Latin scripts", () => {
   });
 });
 
+describe("matchKeywords — simplified and traditional Chinese", () => {
+  it("matches a simplified comment against a traditional keyword", () => {
+    expect(matchKeywords("优惠", ["優惠"], true).matched).toBe(true);
+  });
+
+  it("matches a traditional comment against a simplified keyword", () => {
+    expect(matchKeywords("請輸入連結", ["请输入链接"], true).matched).toBe(true);
+  });
+
+  it("keeps returning the configured keyword spelling", () => {
+    const result = matchKeywords("優惠", ["优惠"], true);
+    expect(result.matched).toBe(true);
+    expect(result.matchedKeyword).toBe("优惠");
+  });
+
+  it("supports simplified/traditional matching in partial mode", () => {
+    expect(matchKeywords("想要优惠链接", ["優惠連結"], false).matched).toBe(true);
+  });
+});
+
 describe("matchKeywords — partial matching", () => {
   it("should match partial words in partial mode", () => {
     const result = matchKeywords("I am linking to you", ["link"], false);

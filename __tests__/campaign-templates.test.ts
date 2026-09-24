@@ -39,8 +39,14 @@ const config: TemplateConfig = {
   requireFollow: true,
   followPromptMessage: "Follow first",
   followPromptButtonLabel: "I'm following",
+  followCheckFailedMessage: "Follow first, then try again",
+  collectEmail: true,
+  emailPromptMessage: "Reply with your email first",
+  emailInvalidMessage: "Use a valid email address",
   followUpEnabled: true,
   followUpMessage: "Thanks!",
+  followUpDestinationUrl: "https://example.com/follow-up",
+  followUpButtonLabel: "See more",
   followUpDelayMinutes: 30,
 };
 const template = { name: "Resource giveaway", config };

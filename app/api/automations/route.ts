@@ -26,12 +26,18 @@ const createAutomationSchema = z
     instagramAccountId: z.string().min(1).optional().nullable(),
     postId: z.string().min(1).optional().nullable(),
     postUrl: z.string().url().optional().nullable(),
+    trackingParamKeys: z.array(z.enum(["account_name", "account_id", "campaign_id", "event_id", "video_id", "commenter_id"])).max(6).optional().default([]),
+    trackingEventId: z.string().max(120).optional().nullable(),
     pendingNextReel: z.boolean().optional().default(false),
     matchAnyPost: z.boolean().optional().default(false),
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
-    dmMessage: z.string().min(1).max(1000),
+    dmMessage: z.string().max(1000).optional().default(""),
+    commentDmEnabled: z.boolean().optional().default(true),
+    aiPublicReplyEnabled: z.boolean().optional().default(false),
+    aiPublicReplyPrompt: z.string().max(2000).optional().nullable(),
+    aiPublicReplyModel: z.string().max(80).optional().nullable(),
     openingDmEnabled: z.boolean().optional().default(false),
     openingDmMessage: z.string().max(1000).optional().nullable(),
     openingDmButtonLabel: z.string().max(64).optional().nullable(),
@@ -39,8 +45,14 @@ const createAutomationSchema = z
     requireFollow: z.boolean().optional().default(false),
     followPromptMessage: z.string().max(1000).optional().nullable(),
     followPromptButtonLabel: z.string().max(20).optional().nullable(),
+    followCheckFailedMessage: z.string().max(1000).optional().nullable(),
+    collectEmail: z.boolean().optional().default(false),
+    emailPromptMessage: z.string().max(1000).optional().nullable(),
+    emailInvalidMessage: z.string().max(1000).optional().nullable(),
     followUpEnabled: z.boolean().optional().default(false),
     followUpMessage: z.string().max(1000).optional().nullable(),
+    followUpDestinationUrl: z.union([z.string().url(), z.literal("")]).optional().nullable(),
+    followUpButtonLabel: z.string().max(20).optional().nullable(),
     // Minutes to wait before the follow-up. Capped at 24h so it stays inside
     // Instagram's messaging window.
     followUpDelayMinutes: z.number().int().min(0).max(1440).optional().default(0),
@@ -70,6 +82,14 @@ const createAutomationSchema = z
     (d) => d.matchAnyPost || d.pendingNextReel || Boolean(d.postId),
     { message: "Choose which post(s) trigger the campaign", path: ["postId"] }
   )
+  .refine(
+    (d) => (d.commentDmEnabled || d.dmTriggerEnabled) ? Boolean(d.dmMessage.trim()) : true,
+    { message: "Add a DM message when private replies are enabled", path: ["dmMessage"] },
+  )
+  .refine(
+    (d) => d.commentDmEnabled || d.publicReplyEnabled,
+    { message: "Enable a public reply when comment DMs are disabled", path: ["commentDmEnabled"] },
+  )
   // And it must match either specific words or any word.
   .refine((d) => d.matchAnyWord || d.keywords.length >= 1, {
     message: "Add at least one keyword, or match any word",
@@ -82,6 +102,12 @@ const createAutomationSchema = z
       (Boolean(d.openingDmMessage?.trim()) &&
         Boolean(d.openingDmButtonLabel?.trim())),
     { message: "Opening DM needs a message and a button label", path: ["openingDmMessage"] }
+  )
+  .refine(
+    (d) =>
+      !d.aiPublicReplyEnabled ||
+      (d.publicReplyEnabled && Boolean(d.aiPublicReplyPrompt?.trim())),
+    { message: "AI public replies need an instruction", path: ["aiPublicReplyPrompt"] },
   );
 
 const updateAutomationSchema = z.object({
@@ -89,12 +115,18 @@ const updateAutomationSchema = z.object({
   goal: z.string().min(1).max(120).optional().nullable(),
   postId: z.string().min(1).optional().nullable(),
   postUrl: z.string().url().optional().nullable(),
+  trackingParamKeys: z.array(z.enum(["account_name", "account_id", "campaign_id", "event_id", "video_id", "commenter_id"])).max(6).optional(),
+  trackingEventId: z.string().max(120).optional().nullable(),
   pendingNextReel: z.boolean().optional(),
   matchAnyPost: z.boolean().optional(),
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
-  dmMessage: z.string().min(1).max(1000).optional(),
+  dmMessage: z.string().max(1000).optional(),
+  commentDmEnabled: z.boolean().optional(),
+    aiPublicReplyEnabled: z.boolean().optional(),
+    aiPublicReplyPrompt: z.string().max(2000).optional().nullable(),
+    aiPublicReplyModel: z.string().max(80).optional().nullable(),
   openingDmEnabled: z.boolean().optional(),
   openingDmMessage: z.string().max(1000).optional().nullable(),
   openingDmButtonLabel: z.string().max(64).optional().nullable(),
@@ -102,8 +134,14 @@ const updateAutomationSchema = z.object({
   requireFollow: z.boolean().optional(),
   followPromptMessage: z.string().max(1000).optional().nullable(),
   followPromptButtonLabel: z.string().max(20).optional().nullable(),
+  followCheckFailedMessage: z.string().max(1000).optional().nullable(),
+  collectEmail: z.boolean().optional(),
+  emailPromptMessage: z.string().max(1000).optional().nullable(),
+  emailInvalidMessage: z.string().max(1000).optional().nullable(),
   followUpEnabled: z.boolean().optional(),
   followUpMessage: z.string().max(1000).optional().nullable(),
+  followUpDestinationUrl: z.union([z.string().url(), z.literal("")]).optional().nullable(),
+  followUpButtonLabel: z.string().max(20).optional().nullable(),
   followUpDelayMinutes: z.number().int().min(0).max(1440).optional(),
   publicReplyEnabled: z.boolean().optional(),
   publicReplyMessage: z.string().max(1000).optional().nullable(),
@@ -123,7 +161,20 @@ const updateAutomationSchema = z.object({
     .optional()
     .nullable(),
   secondaryButtonLabel: z.string().max(20).optional().nullable(),
-});
+}).refine(
+  (d) =>
+    !((d.commentDmEnabled === true) || (d.dmTriggerEnabled === true)) ||
+    Boolean(d.dmMessage?.trim()),
+  { message: "Add a DM message when private replies are enabled", path: ["dmMessage"] },
+).refine(
+  (d) => d.commentDmEnabled !== false || d.publicReplyEnabled === true,
+  { message: "Enable a public reply when comment DMs are disabled", path: ["commentDmEnabled"] },
+).refine(
+  (d) =>
+    d.aiPublicReplyEnabled !== true ||
+    (d.publicReplyEnabled === true && Boolean(d.aiPublicReplyPrompt?.trim())),
+  { message: "AI public replies need an instruction", path: ["aiPublicReplyPrompt"] },
+);
 
 export async function GET(request: NextRequest) {
   const workspaceId = await getCurrentWorkspaceId();
@@ -147,7 +198,10 @@ export async function GET(request: NextRequest) {
         select: { username: true, instagramId: true },
       },
       _count: {
-        select: { dmLogs: true },
+        select: {
+          dmLogs: true,
+          emailCaptures: { where: { capturedAt: { not: null } } },
+        },
       },
       trackedLinks: {
         select: {
@@ -205,6 +259,7 @@ export async function GET(request: NextRequest) {
       skipped: number;
       failed: number;
       clicks: number;
+      emailCaptures: number;
       topKeywords: { keyword: string; count: number }[];
     }
   >();
@@ -215,6 +270,7 @@ export async function GET(request: NextRequest) {
       skipped: 0,
       failed: 0,
       clicks: 0,
+      emailCaptures: automation._count.emailCaptures,
       topKeywords: [],
     });
   }
@@ -256,6 +312,7 @@ export async function GET(request: NextRequest) {
         skipped: 0,
         failed: 0,
         clicks: 0,
+        emailCaptures: automation._count.emailCaptures,
         topKeywords: [],
       };
 
@@ -373,12 +430,25 @@ export async function POST(request: NextRequest) {
       // A next-reel campaign has no post yet; the cron binds it once a reel is posted.
       postId: isSpecificPost ? parsed.data.postId : null,
       postUrl: isSpecificPost ? parsed.data.postUrl : null,
+      trackingParamKeys: parsed.data.trackingParamKeys,
+      trackingEventId: parsed.data.trackingEventId?.trim() || null,
       pendingNextReel,
       matchAnyPost,
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
       dmMessage: parsed.data.dmMessage,
+      commentDmEnabled: parsed.data.commentDmEnabled,
+      aiPublicReplyEnabled:
+        parsed.data.publicReplyEnabled && parsed.data.aiPublicReplyEnabled,
+      aiPublicReplyPrompt:
+        parsed.data.publicReplyEnabled && parsed.data.aiPublicReplyEnabled
+        ? parsed.data.aiPublicReplyPrompt?.trim() || null
+        : null,
+      aiPublicReplyModel:
+        parsed.data.publicReplyEnabled && parsed.data.aiPublicReplyEnabled
+          ? parsed.data.aiPublicReplyModel?.trim() || null
+          : null,
       openingDmEnabled,
       openingDmMessage: openingDmEnabled
         ? parsed.data.openingDmMessage || null
@@ -394,9 +464,25 @@ export async function POST(request: NextRequest) {
       followPromptButtonLabel: parsed.data.requireFollow
         ? parsed.data.followPromptButtonLabel || null
         : null,
+      followCheckFailedMessage: parsed.data.requireFollow
+        ? parsed.data.followCheckFailedMessage || null
+        : null,
+      collectEmail: parsed.data.collectEmail,
+      emailPromptMessage: parsed.data.collectEmail
+        ? parsed.data.emailPromptMessage || null
+        : null,
+      emailInvalidMessage: parsed.data.collectEmail
+        ? parsed.data.emailInvalidMessage || null
+        : null,
       followUpEnabled: parsed.data.followUpEnabled,
       followUpMessage: parsed.data.followUpEnabled
         ? parsed.data.followUpMessage || null
+        : null,
+      followUpDestinationUrl: parsed.data.followUpEnabled
+        ? parsed.data.followUpDestinationUrl || null
+        : null,
+      followUpButtonLabel: parsed.data.followUpEnabled
+        ? parsed.data.followUpButtonLabel || null
         : null,
       followUpDelayMinutes: parsed.data.followUpEnabled
         ? parsed.data.followUpDelayMinutes
@@ -493,13 +579,33 @@ export async function PATCH(request: NextRequest) {
     automationData.openingDmMessage = null;
     automationData.openingDmButtonLabel = null;
   }
+  if (automationData.aiPublicReplyEnabled === false) {
+    automationData.aiPublicReplyPrompt = null;
+    automationData.aiPublicReplyModel = null;
+  } else if (automationData.aiPublicReplyPrompt !== undefined) {
+    automationData.aiPublicReplyPrompt = automationData.aiPublicReplyPrompt?.trim() || null;
+  }
+  if (automationData.aiPublicReplyModel !== undefined && automationData.aiPublicReplyModel !== null) {
+    automationData.aiPublicReplyModel = automationData.aiPublicReplyModel.trim() || null;
+  }
   if (automationData.requireFollow === false) {
     automationData.followPromptMessage = null;
     automationData.followPromptButtonLabel = null;
+    automationData.followCheckFailedMessage = null;
+  }
+  if (automationData.collectEmail === false) {
+    automationData.emailPromptMessage = null;
+    automationData.emailInvalidMessage = null;
   }
   if (automationData.followUpEnabled === false) {
     automationData.followUpMessage = null;
+    automationData.followUpDestinationUrl = null;
+    automationData.followUpButtonLabel = null;
     automationData.followUpDelayMinutes = 0;
+  }
+  if (automationData.followUpDestinationUrl === "") {
+    automationData.followUpDestinationUrl = null;
+    automationData.followUpButtonLabel = null;
   }
   // Any-post / next-reel campaigns carry no specific post.
   if (automationData.matchAnyPost === true || automationData.pendingNextReel === true) {
@@ -517,6 +623,9 @@ export async function PATCH(request: NextRequest) {
   if (automationData.publicReplyEnabled === false) {
     automationData.publicReplyMessages = [];
     automationData.publicReplyMessage = null;
+    automationData.aiPublicReplyEnabled = false;
+    automationData.aiPublicReplyPrompt = null;
+    automationData.aiPublicReplyModel = null;
   }
 
   // One transaction, so a save never lands half applied. Updating the campaign

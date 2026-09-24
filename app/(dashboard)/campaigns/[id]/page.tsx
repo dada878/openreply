@@ -32,8 +32,14 @@ interface Campaign {
   requireFollow: boolean;
   followPromptMessage: string | null;
   followPromptButtonLabel: string | null;
+  followCheckFailedMessage: string | null;
+  collectEmail: boolean;
+  emailPromptMessage: string | null;
+  emailInvalidMessage: string | null;
   followUpEnabled: boolean;
   followUpMessage: string | null;
+  followUpDestinationUrl: string | null;
+  followUpButtonLabel: string | null;
   followUpDelayMinutes: number | null;
   publicReplyEnabled: boolean;
   publicReplyMessage: string | null;
@@ -52,13 +58,20 @@ interface Campaign {
     failed: number;
     clicks: number;
     ctr: number;
+    emailCaptures: number;
   };
 }
 
 type Tab = "insights" | "preview";
 
+type EmailLead = {
+  email: string;
+  commenterName: string | null;
+  capturedAt: string;
+};
+
 export default function CampaignDetailPage() {
-  const { t } = useI18n();
+  const { t, locale } = useI18n();
   const router = useRouter();
   const { id } = useParams<{ id: string }>();
 
@@ -70,6 +83,7 @@ export default function CampaignDetailPage() {
   const [tab, setTab] = useState<Tab>("insights");
   const [previewTab, setPreviewTab] = useState<PreviewTab>("dm");
   const [busy, setBusy] = useState(false);
+  const [emailLeads, setEmailLeads] = useState<EmailLead[] | null>(null);
 
   useEffect(() => {
     fetch("/api/automations", { cache: "no-store" })
@@ -112,6 +126,15 @@ export default function CampaignDetailPage() {
     }
   }, [campaign]);
 
+  useEffect(() => {
+    if (!campaign?.collectEmail) return;
+    fetch(`/api/automations/${campaign.id}/emails`, { cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => {
+        if (payload.success) setEmailLeads(payload.data);
+      });
+  }, [campaign?.collectEmail, campaign?.id]);
+
   async function toggleActive() {
     if (!campaign) return;
     setBusy(true);
@@ -125,6 +148,31 @@ export default function CampaignDetailPage() {
     } finally {
       setBusy(false);
     }
+  }
+
+  async function downloadEmails() {
+    if (!campaign) return;
+    const response = await fetch(`/api/automations/${campaign.id}/emails`, {
+      cache: "no-store",
+    });
+    const payload = await response.json();
+    if (!response.ok || !payload.success) return;
+    const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+    const rows = [
+      ["email", "instagram_username", "captured_at"],
+      ...payload.data.map((lead: { email: string; commenterName: string | null; capturedAt: string }) => [
+        lead.email,
+        lead.commenterName ?? "",
+        lead.capturedAt,
+      ]),
+    ];
+    const csv = `\uFEFF${rows.map((row) => row.map(quote).join(",")).join("\n")}`;
+    const url = URL.createObjectURL(new Blob([csv], { type: "text/csv;charset=utf-8" }));
+    const anchor = document.createElement("a");
+    anchor.href = url;
+    anchor.download = `${campaign.name.replace(/[^a-z0-9-_]+/gi, "-") || "campaign"}-emails.csv`;
+    anchor.click();
+    URL.revokeObjectURL(url);
   }
 
   if (loading) {
@@ -164,6 +212,9 @@ export default function CampaignDetailPage() {
 
   const metrics = [
     { label: t("Sends"), value: campaign.analytics.sent },
+    ...(campaign.collectEmail
+      ? [{ label: t("Emails collected"), value: campaign.analytics.emailCaptures }]
+      : []),
     { label: t("Clicks"), value: campaign.analytics.clicks },
     { label: t("CTR"), value: `${campaign.analytics.ctr}%` },
     { label: t("Failed"), value: campaign.analytics.failed },
@@ -249,6 +300,17 @@ export default function CampaignDetailPage() {
           </Summary>
         )}
 
+        {campaign.collectEmail && (
+          <Summary title={t("They must share an email first")}>
+            <FieldBox>
+              {campaign.emailPromptMessage || t("Reply with your email and I’ll send the content over.")}
+            </FieldBox>
+            <FieldBox>
+              {campaign.emailInvalidMessage || t("Please enter a valid email address.")}
+            </FieldBox>
+          </Summary>
+        )}
+
         <Summary title={t("And then, they will get a DM")}>
           <FieldBox>{campaign.dmMessage}</FieldBox>
           {hasLink && (
@@ -284,6 +346,14 @@ export default function CampaignDetailPage() {
         {campaign.followUpEnabled && campaign.followUpMessage && (
           <Summary title={t("Then a follow-up message")}>
             <FieldBox>{campaign.followUpMessage}</FieldBox>
+            {campaign.followUpDestinationUrl && (
+              <>
+                <FieldBox>{campaign.followUpButtonLabel || "Open link"}</FieldBox>
+                <p className="break-all text-xs text-muted">
+                  {campaign.followUpDestinationUrl}
+                </p>
+              </>
+            )}
             <p className="text-xs text-muted">
               {campaign.followUpDelayMinutes && campaign.followUpDelayMinutes > 0
                 ? t("Sent {minutes} min after the link.", { minutes: campaign.followUpDelayMinutes })
@@ -326,15 +396,66 @@ export default function CampaignDetailPage() {
         </div>
 
         {tab === "insights" && (
-          <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
-            {metrics.map((m) => (
-              <div key={m.label} className="panel rounded p-4">
-                <p className="text-sm text-muted">{m.label}</p>
-                <p className="mt-1 text-2xl font-semibold text-foreground">
-                  {m.value}
-                </p>
-              </div>
-            ))}
+          <div className="space-y-4">
+            <div className="grid grid-cols-2 gap-4 sm:grid-cols-4">
+              {metrics.map((m) => (
+                <div key={m.label} className="panel rounded p-4">
+                  <p className="text-sm text-muted">{m.label}</p>
+                  <p className="mt-1 text-2xl font-semibold text-foreground">
+                    {m.value}
+                  </p>
+                </div>
+              ))}
+            </div>
+            {campaign.collectEmail && (
+              <section className="panel rounded p-4 sm:p-5">
+                <div className="mb-4 flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-medium text-foreground">{t("Email leads")}</h2>
+                    <p className="mt-1 text-sm text-muted">
+                      {t("{count} emails collected", { count: emailLeads?.length ?? 0 })}
+                    </p>
+                  </div>
+                  <button
+                    type="button"
+                    onClick={downloadEmails}
+                    className="rounded border border-border px-3 py-2 text-sm text-muted hover:text-foreground"
+                  >
+                    {t("Download email list")}
+                  </button>
+                </div>
+                {emailLeads === null ? (
+                  <p className="text-sm text-muted">{t("Loading…")}</p>
+                ) : emailLeads.length === 0 ? (
+                  <p className="text-sm text-muted">{t("No email leads yet")}</p>
+                ) : (
+                  <div className="overflow-x-auto">
+                    <table className="w-full min-w-[520px] text-left text-sm">
+                      <thead className="border-b border-border text-xs text-muted">
+                        <tr>
+                          <th className="px-3 py-2 font-medium">{t("Email")}</th>
+                          <th className="px-3 py-2 font-medium">{t("Instagram username")}</th>
+                          <th className="px-3 py-2 font-medium">{t("Captured at")}</th>
+                        </tr>
+                      </thead>
+                      <tbody>
+                        {emailLeads.map((lead) => (
+                          <tr key={`${lead.email}:${lead.capturedAt}`} className="border-b border-border/70 last:border-0">
+                            <td className="px-3 py-3 text-foreground">{lead.email}</td>
+                            <td className="px-3 py-3 text-foreground">
+                              {lead.commenterName ? `@${lead.commenterName}` : "—"}
+                            </td>
+                            <td className="px-3 py-3 text-muted">
+                              {new Date(lead.capturedAt).toLocaleString(locale)}
+                            </td>
+                          </tr>
+                        ))}
+                      </tbody>
+                    </table>
+                  </div>
+                )}
+              </section>
+            )}
           </div>
         )}
 
@@ -370,8 +491,12 @@ export default function CampaignDetailPage() {
             followPromptButtonLabel={
               campaign.followPromptButtonLabel ?? "i'm following"
             }
+            collectEmail={campaign.collectEmail}
+            emailPromptMessage={campaign.emailPromptMessage ?? ""}
             followUpEnabled={campaign.followUpEnabled ?? false}
             followUpMessage={campaign.followUpMessage ?? ""}
+            followUpDestinationUrl={campaign.followUpDestinationUrl ?? undefined}
+            followUpButtonLabel={campaign.followUpButtonLabel ?? "Open link"}
             followUpDelayMinutes={campaign.followUpDelayMinutes ?? 0}
           />
           </div>

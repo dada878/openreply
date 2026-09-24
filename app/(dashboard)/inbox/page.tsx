@@ -13,6 +13,7 @@
 import type { Locale } from "@/lib/i18n";
 import { useI18n } from "@/lib/i18n/provider";
 import { useCallback, useEffect, useRef, useState } from "react";
+import { useQueryClient } from "@tanstack/react-query";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import { readCache, writeCache } from "@/lib/client-cache";
 import type { ConversationListItem } from "@/app/api/instagram/conversations/route";
@@ -39,6 +40,7 @@ function formatTime(iso: string | null, locale: Locale): string {
 
 export default function InboxPage() {
   const { t, locale } = useI18n();
+  const queryClient = useQueryClient();
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   // Seed from the last-used account so a revisit can paint the cached
   // conversation list immediately, before the account list even loads.
@@ -68,10 +70,16 @@ export default function InboxPage() {
   // lightweight accounts endpoint (one query) rather than the heavy dashboard
   // stats aggregation, so the inbox isn't gated on analytics before it can load.
   useEffect(() => {
-    fetch("/api/instagram/accounts")
-      .then((r) => r.json())
+    queryClient.fetchQuery({
+      queryKey: ["instagram-accounts"],
+      queryFn: async () => {
+        const response = await fetch("/api/instagram/accounts");
+        const payload = await response.json();
+        if (!response.ok || !payload.success) throw new Error(payload.error ?? "Failed to load accounts");
+        return payload;
+      },
+    })
       .then((payload) => {
-        if (!payload.success) return;
         const next: AccountOption[] = payload.data.instagramAccounts ?? [];
         setAccounts(next);
         setSelectedAccountId((prev) => {
@@ -84,7 +92,7 @@ export default function InboxPage() {
         });
       })
       .catch(() => setAccounts([]));
-  }, []);
+  }, [queryClient]);
 
   // Remember the chosen account for the next visit.
   useEffect(() => {
@@ -98,11 +106,21 @@ export default function InboxPage() {
       conversationRequests.current.add(selectedAccountId);
       if (!silent) setConvLoading(true);
       try {
-        const res = await fetch(
-          `/api/instagram/conversations?instagramAccountId=${selectedAccountId}`,
-          { cache: "no-store" }
-        );
-        const data = await res.json();
+        const data = await queryClient.fetchQuery({
+          queryKey: ["inbox-conversations", selectedAccountId],
+          // Polling must bypass a fresh cache; sidebar navigation can still
+          // reuse this result instantly before the next interval runs.
+          staleTime: silent ? 0 : 30_000,
+          queryFn: async () => {
+            const res = await fetch(
+              `/api/instagram/conversations?instagramAccountId=${selectedAccountId}`,
+              { cache: "no-store" }
+            );
+            const payload = await res.json();
+            if (!res.ok || !payload.success) throw new Error(payload.error ?? "Failed to load conversations");
+            return payload;
+          },
+        });
         if (data.success) {
           setConversations(data.data.conversations);
           writeCache(convCacheKey(selectedAccountId), data.data.conversations);
@@ -117,7 +135,7 @@ export default function InboxPage() {
         if (!silent) setConvLoading(false);
       }
     },
-    [selectedAccountId]
+    [queryClient, selectedAccountId]
   );
 
   // Load + poll conversations for the selected account. A cached list is shown
@@ -150,11 +168,19 @@ export default function InboxPage() {
       if (!selectedAccountId) return;
       if (!silent) setThreadLoading(true);
       try {
-        const res = await fetch(
-          `/api/instagram/conversations/${conversationId}?instagramAccountId=${selectedAccountId}`,
-          { cache: "no-store" }
-        );
-        const data = await res.json();
+        const data = await queryClient.fetchQuery({
+          queryKey: ["inbox-thread", selectedAccountId, conversationId],
+          staleTime: silent ? 0 : 30_000,
+          queryFn: async () => {
+            const res = await fetch(
+              `/api/instagram/conversations/${conversationId}?instagramAccountId=${selectedAccountId}`,
+              { cache: "no-store" }
+            );
+            const payload = await res.json();
+            if (!res.ok || !payload.success) throw new Error(payload.error ?? "Failed to load conversation");
+            return payload;
+          },
+        });
         if (data.success) {
           setMessages(data.data.messages);
           writeCache(msgCacheKey(conversationId), data.data.messages);
@@ -165,7 +191,7 @@ export default function InboxPage() {
         if (!silent) setThreadLoading(false);
       }
     },
-    [selectedAccountId]
+    [queryClient, selectedAccountId]
   );
 
   // Load + poll the open thread. Cached messages render instantly while a fresh
@@ -224,6 +250,13 @@ export default function InboxPage() {
       createdTime: new Date().toISOString(),
     };
     setMessages((prev) => [...prev, optimistic]);
+    const threadKey = ["inbox-thread", selectedAccountId, active.id] as const;
+    queryClient.setQueryData<{ success: true; data: { messages: ThreadMessage[] } }>(
+      threadKey,
+      (current) => current
+        ? { ...current, data: { ...current.data, messages: [...current.data.messages, optimistic] } }
+        : current,
+    );
     setDraft("");
 
     try {
@@ -243,11 +276,23 @@ export default function InboxPage() {
       } else {
         // Roll the optimistic message back and restore the draft so it's not lost.
         setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+        queryClient.setQueryData<{ success: true; data: { messages: ThreadMessage[] } }>(
+          threadKey,
+          (current) => current
+            ? { ...current, data: { ...current.data, messages: current.data.messages.filter((message) => message.id !== optimistic.id) } }
+            : current,
+        );
         setDraft(text);
         setSendError(data.error ?? t("Failed to send message"));
       }
     } catch {
       setMessages((prev) => prev.filter((m) => m.id !== optimistic.id));
+      queryClient.setQueryData<{ success: true; data: { messages: ThreadMessage[] } }>(
+        threadKey,
+        (current) => current
+          ? { ...current, data: { ...current.data, messages: current.data.messages.filter((message) => message.id !== optimistic.id) } }
+          : current,
+      );
       setDraft(text);
       setSendError(t("Failed to send message"));
     } finally {

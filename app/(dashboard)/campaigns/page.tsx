@@ -7,7 +7,8 @@
  */
 
 import { useI18n } from "@/lib/i18n/provider";
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
+import { useMutation, useQuery, useQueryClient } from "@tanstack/react-query";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import NewCampaignMenu from "@/components/new-campaign-menu";
@@ -67,10 +68,8 @@ interface Campaign {
 export default function CampaignsPage() {
   const { t, label } = useI18n();
   const router = useRouter();
-  const [automations, setAutomations] = useState<Campaign[]>([]);
-  const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
-  const [loading, setLoading] = useState(true);
+  const queryClient = useQueryClient();
   // postId -> current thumbnail URL, fetched live (Instagram URLs expire, so
   // they are never stored on the campaign).
   const [thumbnails, setThumbnails] = useState<Record<string, string>>({});
@@ -88,40 +87,67 @@ export default function CampaignsPage() {
     "all"
   );
 
-  const fetchAutomations = useCallback(async () => {
-    try {
+  const automationQueryKey = ["automations", selectedAccountId] as const;
+  const { data: automations = [], isLoading: loading } = useQuery({
+    queryKey: automationQueryKey,
+    queryFn: async () => {
       const params = new URLSearchParams();
-      if (selectedAccountId !== "all") {
-        params.set("instagramAccountId", selectedAccountId);
-      }
-      const res = await fetch(
-        `/api/automations${params.size ? `?${params}` : ""}`,
-        { cache: "no-store" }
+      if (selectedAccountId !== "all") params.set("instagramAccountId", selectedAccountId);
+      const response = await fetch(`/api/automations${params.size ? `?${params}` : ""}`, { cache: "no-store" });
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error ?? "Failed to load campaigns");
+      return payload.data as Campaign[];
+    },
+  });
+  const { data: accounts = [] } = useQuery({
+    queryKey: ["instagram-accounts"],
+    queryFn: async () => {
+      const response = await fetch("/api/dashboard/stats");
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error ?? "Failed to load accounts");
+      return (payload.data.instagramAccounts ?? []) as AccountOption[];
+    },
+  });
+
+  const toggleMutation = useMutation({
+    mutationFn: async ({ id, isActive }: { id: string; isActive: boolean }) => {
+      const response = await fetch(`/api/automations?id=${id}`, {
+        method: "PATCH",
+        headers: { "Content-Type": "application/json" },
+        body: JSON.stringify({ isActive: !isActive }),
+      });
+      if (!response.ok) throw new Error("Failed to toggle campaign");
+    },
+    onMutate: async ({ id, isActive }) => {
+      await queryClient.cancelQueries({ queryKey: automationQueryKey });
+      const previous = queryClient.getQueryData<Campaign[]>(automationQueryKey);
+      queryClient.setQueryData<Campaign[]>(automationQueryKey, (current = []) =>
+        current.map((campaign) => campaign.id === id ? { ...campaign, isActive: !isActive } : campaign),
       );
-      const data = await res.json();
-      if (data.success) setAutomations(data.data);
-    } catch (err) {
-      console.error("Failed to fetch campaigns:", err);
-    } finally {
-      setLoading(false);
-    }
-  }, [selectedAccountId]);
+      return { previous };
+    },
+    onError: (_error, _variables, context) => {
+      if (context?.previous) queryClient.setQueryData(automationQueryKey, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
+  });
 
-  useEffect(() => {
-    fetch("/api/dashboard/stats")
-      .then((res) => res.json())
-      .then((payload) => {
-        if (payload.success) setAccounts(payload.data.instagramAccounts ?? []);
-      })
-      .catch(console.error);
-  }, []);
-
-  useEffect(() => {
-    const timer = window.setTimeout(() => {
-      void fetchAutomations();
-    }, 0);
-    return () => window.clearTimeout(timer);
-  }, [fetchAutomations]);
+  const deleteMutation = useMutation({
+    mutationFn: async (id: string) => {
+      const response = await fetch(`/api/automations?id=${id}`, { method: "DELETE" });
+      if (!response.ok) throw new Error("Failed to delete campaign");
+    },
+    onMutate: async (id) => {
+      await queryClient.cancelQueries({ queryKey: automationQueryKey });
+      const previous = queryClient.getQueryData<Campaign[]>(automationQueryKey);
+      queryClient.setQueryData<Campaign[]>(automationQueryKey, (current = []) => current.filter((campaign) => campaign.id !== id));
+      return { previous };
+    },
+    onError: (_error, _id, context) => {
+      if (context?.previous) queryClient.setQueryData(automationQueryKey, context.previous);
+    },
+    onSettled: () => queryClient.invalidateQueries({ queryKey: ["automations"] }),
+  });
 
   // Fetch fresh post thumbnails (and reel video URLs) for the accounts in view
   // and map them by postId. Cache-first so they show instantly on a return
@@ -196,23 +222,11 @@ export default function CampaignsPage() {
   }, [playingVideo]);
 
   function handleAccountChange(accountId: string) {
-    setLoading(true);
     setSelectedAccountId(accountId);
   }
 
-  async function toggleActive(id: string, isActive: boolean) {
-    try {
-      await fetch(`/api/automations?id=${id}`, {
-        method: "PATCH",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({ isActive: !isActive }),
-      });
-      setAutomations((prev) =>
-        prev.map((a) => (a.id === id ? { ...a, isActive: !isActive } : a))
-      );
-    } catch (err) {
-      console.error("Failed to toggle:", err);
-    }
+  function toggleActive(id: string, isActive: boolean) {
+    toggleMutation.mutate({ id, isActive });
   }
 
   async function copyReelUrl(auto: Campaign) {
@@ -230,14 +244,9 @@ export default function CampaignsPage() {
     }
   }
 
-  async function deleteAutomation(id: string) {
+  function deleteAutomation(id: string) {
     if (!confirm(t("Delete this campaign? This cannot be undone."))) return;
-    try {
-      await fetch(`/api/automations?id=${id}`, { method: "DELETE" });
-      setAutomations((prev) => prev.filter((a) => a.id !== id));
-    } catch (err) {
-      console.error("Failed to delete:", err);
-    }
+    deleteMutation.mutate(id);
   }
 
   // The copy is made server-side from the stored campaign, so settings this
@@ -250,7 +259,7 @@ export default function CampaignsPage() {
         method: "POST",
       });
       const data = await res.json();
-      if (data.success) void fetchAutomations();
+      if (data.success) void queryClient.invalidateQueries({ queryKey: ["automations"] });
       else console.error("Duplicate failed:", data.error);
     } catch (err) {
       console.error("Failed to duplicate:", err);

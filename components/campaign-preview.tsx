@@ -40,8 +40,12 @@ interface CampaignPreviewProps {
   requireFollow: boolean;
   followPromptMessage: string;
   followPromptButtonLabel: string;
+  collectEmail: boolean;
+  emailPromptMessage: string;
   followUpEnabled: boolean;
   followUpMessage: string;
+  followUpDestinationUrl?: string;
+  followUpButtonLabel: string;
   followUpDelayMinutes?: number;
 }
 
@@ -323,8 +327,12 @@ function DmScreen({
   requireFollow,
   followPromptMessage,
   followPromptButtonLabel,
+  collectEmail,
+  emailPromptMessage,
   followUpEnabled,
   followUpMessage,
+  followUpDestinationUrl,
+  followUpButtonLabel,
   followUpDelayMinutes = 0,
   linkUrl,
   inboundMessage,
@@ -343,8 +351,12 @@ function DmScreen({
   requireFollow: boolean;
   followPromptMessage: string;
   followPromptButtonLabel: string;
+  collectEmail: boolean;
+  emailPromptMessage: string;
   followUpEnabled: boolean;
   followUpMessage: string;
+  followUpDestinationUrl?: string;
+  followUpButtonLabel: string;
   followUpDelayMinutes?: number;
   // Present on the keyword-trigger thread: the DM the user sends to start it.
   inboundMessage?: string;
@@ -406,6 +418,28 @@ function DmScreen({
             <div className="flex justify-end">
               <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
                 {followPromptButtonLabel || "i'm following"}
+              </div>
+            </div>
+          </>
+        )}
+        {collectEmail && (
+          <>
+            <div className="flex items-end gap-2">
+              <Avatar url={avatarUrl} size={24} />
+              <div className="max-w-[80%] rounded-2xl rounded-bl-md bg-zinc-800 px-3 py-2">
+                <p className="whitespace-pre-wrap text-sm">
+                  {(emailPromptMessage || t("Reply with your email and I’ll send the content over.")).replace(/\{username\}/g, SAMPLE_USER)}
+                </p>
+                {followUpDestinationUrl && (
+                  <div className="mt-2 rounded-xl bg-zinc-700 px-4 py-1.5 text-center text-sm font-medium text-white">
+                    {followUpButtonLabel || "Open link"}
+                  </div>
+                )}
+              </div>
+            </div>
+            <div className="flex justify-end">
+              <div className="rounded-2xl rounded-br-md bg-accent px-3 py-2 text-sm">
+                name@example.com
               </div>
             </div>
           </>
@@ -531,8 +565,12 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             requireFollow={props.requireFollow}
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
+            collectEmail={props.collectEmail}
+            emailPromptMessage={props.emailPromptMessage}
             followUpEnabled={props.followUpEnabled}
             followUpMessage={props.followUpMessage}
+            followUpDestinationUrl={props.followUpDestinationUrl}
+            followUpButtonLabel={props.followUpButtonLabel}
             followUpDelayMinutes={props.followUpDelayMinutes}
             linkUrl={props.linkUrl}
           />
@@ -553,8 +591,12 @@ export default function CampaignPreview(props: CampaignPreviewProps) {
             requireFollow={props.requireFollow}
             followPromptMessage={props.followPromptMessage}
             followPromptButtonLabel={props.followPromptButtonLabel}
+            collectEmail={props.collectEmail}
+            emailPromptMessage={props.emailPromptMessage}
             followUpEnabled={props.followUpEnabled}
             followUpMessage={props.followUpMessage}
+            followUpDestinationUrl={props.followUpDestinationUrl}
+            followUpButtonLabel={props.followUpButtonLabel}
             followUpDelayMinutes={props.followUpDelayMinutes}
             linkUrl={props.linkUrl}
             inboundMessage={props.sampleComment}

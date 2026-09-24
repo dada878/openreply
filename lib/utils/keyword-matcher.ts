@@ -14,6 +14,11 @@
  * here uses Unicode property escapes (`\p{L}` letters, `\p{N}` numbers) with the
  * `u` flag so non-Latin scripts work.
  *
+ * Chinese-variant note: Chinese commenters may type the same word in either
+ * simplified or traditional characters. Chinese comparison forms are built in
+ * both directions so a campaign does not miss a comment just because its
+ * spelling differs from the configured keyword.
+ *
  * Diacritics note: `\p{L}` keeps accented letters intact, which is correct, but
  * it means "PREÇO" and "preco" stay different strings and never match each
  * other. Commenters type accents inconsistently and keyboards differ, so a
@@ -21,6 +26,8 @@
  * commenter who typed "preço", and vice versa. `foldDiacritics` closes that
  * gap on BOTH sides of the comparison.
  */
+
+import OpenCC from "opencc-js";
 
 export interface KeywordMatchResult {
   matched: boolean;
@@ -155,12 +162,47 @@ export function foldDiacritics(text: string): string {
   return out.normalize("NFC");
 }
 
+const HAN_CHARACTER = /\p{Script=Han}/u;
+// The phrase-aware Taiwan preset handles both character conversion and common
+// regional wording (for example, "鏈接"/"連結"), which is what commenters
+// usually mean when they switch between simplified and traditional Chinese.
+const SIMPLIFIED_TO_TRADITIONAL = OpenCC.Converter({ from: "cn", to: "twp" });
+const TRADITIONAL_TO_SIMPLIFIED = OpenCC.Converter({ from: "twp", to: "cn" });
+
+/**
+ * Produce the normalized forms used for one side of a comparison.
+ *
+ * The original spelling is always retained. The two OpenCC forms are added
+ * only when Han characters are present, so English, Arabic, Cyrillic and other
+ * existing matching rules keep exactly the same behavior and cost.
+ */
+function comparisonForms(text: string): string[] {
+  const sourceForms = HAN_CHARACTER.test(text)
+    ? [
+        text,
+        SIMPLIFIED_TO_TRADITIONAL(text),
+        TRADITIONAL_TO_SIMPLIFIED(text),
+      ]
+    : [text];
+
+  return [
+    ...new Set(
+      sourceForms.map((form) =>
+        foldDiacritics(
+          stripSpecialCharacters(normalizeArabicScript(form))
+        ).toLowerCase()
+      )
+    ),
+  ].filter(Boolean);
+}
+
 /**
  * Check if a comment text matches any of the given keywords.
  *
- * Both sides are stripped of special characters and folded for Latin
- * diacritics before comparison, so "PREÇO" matches a "preco" keyword and a
- * "preço" keyword matches a "PRECO" comment.
+ * Both sides are stripped of special characters, folded for Latin diacritics,
+ * and (for Chinese text) compared in simplified and traditional forms. This
+ * means "優惠" matches "优惠" in either direction, while "PREÇO" still
+ * matches a "preco" keyword.
  *
  * @param commentText - The raw comment text to check
  * @param keywords - Array of keywords to match against
@@ -177,48 +219,51 @@ export function matchKeywords(
     return { matched: false, matchedKeyword: null };
   }
 
-  const cleanedText = foldDiacritics(
-    stripSpecialCharacters(normalizeArabicScript(commentText))
-  ).toLowerCase();
+  const textForms = comparisonForms(commentText);
 
-  if (!cleanedText) {
+  if (textForms.length === 0) {
     return { matched: false, matchedKeyword: null };
   }
 
   for (const keyword of keywords) {
-    const cleanedKeyword = foldDiacritics(
-      stripSpecialCharacters(normalizeArabicScript(keyword))
-    ).toLowerCase();
+    const keywordForms = comparisonForms(keyword);
 
-    if (!cleanedKeyword) continue;
+    for (const keywordForm of keywordForms) {
+      // Only numeric-like keywords get the O/0 fold — a word keyword compares
+      // exactly as before.
+      const numericLike = isNumericLikeKeyword(keywordForm);
+      const compareKeyword = numericLike
+        ? foldNumericHomoglyphs(keywordForm)
+        : keywordForm;
 
-    // Only numeric-like keywords get the O/0 fold — a word keyword compares
-    // exactly as before.
-    const numericLike = isNumericLikeKeyword(cleanedKeyword);
-    const compareText = numericLike
-      ? foldNumericHomoglyphs(cleanedText)
-      : cleanedText;
-    const compareKeyword = numericLike
-      ? foldNumericHomoglyphs(cleanedKeyword)
-      : cleanedKeyword;
-
-    if (wholeWordMatch) {
-      const escapedKeyword = compareKeyword.replace(
-        /[.*+?^${}()|[\]\\]/g,
-        "\\$&"
-      );
-      // Unicode-aware "whole word": the keyword must not be flanked by another
-      // letter or number. Lookarounds replace ASCII `\b`, which never fires
-      // between two non-Latin characters.
-      const regex = new RegExp(
-        `(?<![\\p{L}\\p{N}])${escapedKeyword}(?![\\p{L}\\p{N}])`,
-        "iu"
-      );
-      if (regex.test(compareText)) {
-        return { matched: true, matchedKeyword: keyword };
-      }
-    } else {
-      if (compareText.includes(compareKeyword)) {
+      if (wholeWordMatch) {
+        const escapedKeyword = compareKeyword.replace(
+          /[.*+?^${}()|[\]\\]/g,
+          "\\$&"
+        );
+        // Unicode-aware "whole word": the keyword must not be flanked by another
+        // letter or number. Lookarounds replace ASCII `\b`, which never fires
+        // between two non-Latin characters.
+        const regex = new RegExp(
+          `(?<![\\p{L}\\p{N}])${escapedKeyword}(?![\\p{L}\\p{N}])`,
+          "iu"
+        );
+        if (
+          textForms.some((textForm) =>
+            regex.test(
+              numericLike ? foldNumericHomoglyphs(textForm) : textForm
+            )
+          )
+        ) {
+          return { matched: true, matchedKeyword: keyword };
+        }
+      } else if (
+        textForms.some((textForm) =>
+          (numericLike ? foldNumericHomoglyphs(textForm) : textForm).includes(
+            compareKeyword
+          )
+        )
+      ) {
         return { matched: true, matchedKeyword: keyword };
       }
     }

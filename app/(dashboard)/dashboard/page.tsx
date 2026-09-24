@@ -7,7 +7,8 @@
  */
 
 import { useI18n } from "@/lib/i18n/provider";
-import { useEffect, useState } from "react";
+import { useState } from "react";
+import { useQuery } from "@tanstack/react-query";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import StatCard from "@/components/stat-card";
 import StatusBadge from "@/components/status-badge";
@@ -43,27 +44,20 @@ interface DashboardStats {
 
 export default function DashboardPage() {
   const { t, label } = useI18n();
-  const [stats, setStats] = useState<DashboardStats | null>(null);
-  const [loading, setLoading] = useState(true);
   const [selectedAccountId, setSelectedAccountId] = useState("all");
-
-  useEffect(() => {
-    const params = new URLSearchParams();
-    if (selectedAccountId !== "all") {
-      params.set("instagramAccountId", selectedAccountId);
-    }
-
-    fetch(`/api/dashboard/stats${params.size ? `?${params}` : ""}`)
-      .then((r) => r.json())
-      .then((data) => {
-        if (data.success) setStats(data.data);
-      })
-      .catch(console.error)
-      .finally(() => setLoading(false));
-  }, [selectedAccountId]);
+  const { data: stats, isLoading: loading } = useQuery({
+    queryKey: ["dashboard-stats", selectedAccountId],
+    queryFn: async () => {
+      const params = new URLSearchParams();
+      if (selectedAccountId !== "all") params.set("instagramAccountId", selectedAccountId);
+      const response = await fetch(`/api/dashboard/stats${params.size ? `?${params}` : ""}`);
+      const payload = await response.json();
+      if (!response.ok || !payload.success) throw new Error(payload.error ?? "Failed to load dashboard");
+      return payload.data as DashboardStats;
+    },
+  });
 
   function handleAccountChange(accountId: string) {
-    setLoading(true);
     setSelectedAccountId(accountId);
   }
 

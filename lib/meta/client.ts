@@ -70,6 +70,7 @@ export interface InstagramComment {
   from?: {
     id: string;
     username?: string;
+    name?: string;
   };
   timestamp: string;
   // Present when the comments query asks for replies{from}. Used to tell whether
@@ -278,6 +279,34 @@ export async function getUserFollowStatus(
     return typeof data?.is_user_follow_business === "boolean"
       ? data.is_user_follow_business
       : null;
+  } catch {
+    return null;
+  }
+}
+
+/**
+ * Read the public profile fields Meta exposes for a user in an active
+ * Instagram conversation. Display names are optional and may be unavailable;
+ * callers should keep the username fallback.
+ */
+export async function getRecipientProfile(
+  accessToken: string,
+  recipientId: string,
+): Promise<{ username?: string; name?: string } | null> {
+  const url = new URL(`${instagramGraphBase()}/${recipientId}`);
+  url.searchParams.set("fields", "username,name");
+
+  try {
+    const response = await fetch(url.toString(), {
+      method: "GET",
+      headers: { Authorization: `Bearer ${accessToken}` },
+    });
+    if (!response.ok) return null;
+    const data = (await response.json()) as { username?: unknown; name?: unknown };
+    return {
+      ...(typeof data.username === "string" ? { username: data.username } : {}),
+      ...(typeof data.name === "string" ? { name: data.name } : {}),
+    };
   } catch {
     return null;
   }

@@ -10,7 +10,7 @@ const envelopeSchema = z.object({
   account: z.object({ id: z.string(), platform: z.literal('instagram') }),
   comment: z.object({
     id: z.string().min(1), platformPostId: z.string().min(1), text: z.string(),
-    author: z.object({ id: z.string().min(1), username: z.string().optional() }),
+    author: z.object({ id: z.string().min(1), username: z.string().optional(), displayName: z.string().optional() }),
   }).optional(),
   message: z.object({
     platformMessageId: z.string().min(1), direction: z.enum(['incoming', 'outgoing']),
@@ -37,7 +37,16 @@ export function normalizeZernioEvent({ payload, account }: {
   const { event, comment, message, metadata, conversation, statusAt } = parsed.data;
   const entry: InstagramPayload['entry'][number] = { id: account.instagramId, time: Date.now() };
   if (event === 'comment.received' && comment) {
-    entry.changes = [{ field: 'comments', value: { id: comment.id, text: comment.text, from: comment.author, media: { id: comment.platformPostId } } }];
+    entry.changes = [{ field: 'comments', value: {
+      id: comment.id,
+      text: comment.text,
+      from: {
+        id: comment.author.id,
+        username: comment.author.username,
+        name: comment.author.displayName,
+      },
+      media: { id: comment.platformPostId },
+    } }];
   } else if (event === 'message.received' && message?.direction === 'incoming') {
     const sender = { id: message.sender.id };
     entry.messaging = [metadata?.postbackPayload
