@@ -3,6 +3,7 @@
 import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useState } from "react";
 import StatusBadge from "@/components/status-badge";
+import { DiagnosticsSkeleton } from "@/components/loading-skeleton";
 
 interface DiagnosticsData {
   queueCounts: Record<string, number>;
@@ -113,7 +114,7 @@ export default function DiagnosticsPage() {
   }, []);
 
   if (loading && !data) {
-    return <div className="panel rounded p-8 h-64" />;
+    return <DiagnosticsSkeleton />;
   }
 
   const workerAgeSeconds =

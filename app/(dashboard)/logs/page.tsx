@@ -10,6 +10,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useState, useCallback } from "react";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import StatusBadge from "@/components/status-badge";
+import { Skeleton } from "@/components/loading-skeleton";
 
 interface DmLog {
   id: string;
@@ -152,7 +153,14 @@ export default function LogsPage() {
                   {[...Array(5)].map((_, i) => (
                     <tr key={i}>
                       <td colSpan={6} className="px-4 py-4 sm:px-6">
-                        <div className="h-4 bg-surface-hover rounded" />
+                        <div className="grid grid-cols-6 items-center gap-4">
+                          <Skeleton className="h-3.5 w-24 rounded" />
+                          <Skeleton className="h-3.5 w-36 rounded" />
+                          <Skeleton className="h-3.5 w-28 rounded" />
+                          <Skeleton className="h-3.5 w-24 rounded" />
+                          <Skeleton className="h-5 w-16 rounded-full" />
+                          <Skeleton className="ml-auto h-3.5 w-24 rounded" />
+                        </div>
                       </td>
                     </tr>
                   ))}

@@ -13,6 +13,7 @@ import { useEffect, useState } from "react";
 import { useParams, useRouter } from "next/navigation";
 import Link from "next/link";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
+import { CampaignDetailSkeleton, Skeleton } from "@/components/loading-skeleton";
 
 interface Campaign {
   id: string;
@@ -176,7 +177,7 @@ export default function CampaignDetailPage() {
   }
 
   if (loading) {
-    return <div className="panel h-64 rounded" />;
+    return <CampaignDetailSkeleton />;
   }
   if (notFound || !campaign) {
     return (
@@ -425,7 +426,15 @@ export default function CampaignDetailPage() {
                   </button>
                 </div>
                 {emailLeads === null ? (
-                  <p className="text-sm text-muted">{t("Loading…")}</p>
+                  <div aria-busy="true" className="space-y-3">
+                    {Array.from({ length: 3 }, (_, i) => (
+                      <div key={i} className="grid grid-cols-3 gap-4 border-b border-border/70 pb-3 last:border-0">
+                        <Skeleton className="h-3.5 w-4/5 rounded" />
+                        <Skeleton className="h-3.5 w-3/5 rounded" />
+                        <Skeleton className="ml-auto h-3.5 w-24 rounded" />
+                      </div>
+                    ))}
+                  </div>
                 ) : emailLeads.length === 0 ? (
                   <p className="text-sm text-muted">{t("No email leads yet")}</p>
                 ) : (

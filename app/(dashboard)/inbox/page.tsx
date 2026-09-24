@@ -18,6 +18,7 @@ import AccountSelect, { type AccountOption } from "@/components/account-select";
 import { readCache, writeCache } from "@/lib/client-cache";
 import type { ConversationListItem } from "@/app/api/instagram/conversations/route";
 import type { ThreadMessage } from "@/app/api/instagram/conversations/[id]/route";
+import { InboxSkeleton, Skeleton } from "@/components/loading-skeleton";
 
 const POLL_MS = 12_000;
 // Cached list/threads are shown instantly on revisit, then revalidated in the
@@ -42,6 +43,7 @@ export default function InboxPage() {
   const { t, locale } = useI18n();
   const queryClient = useQueryClient();
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
+  const [accountsLoading, setAccountsLoading] = useState(true);
   // Seed from the last-used account so a revisit can paint the cached
   // conversation list immediately, before the account list even loads.
   const [selectedAccountId, setSelectedAccountId] = useState(() => {
@@ -91,7 +93,8 @@ export default function InboxPage() {
             : payload.data.selectedInstagramAccountId || next[0]?.id || "";
         });
       })
-      .catch(() => setAccounts([]));
+      .catch(() => setAccounts([]))
+      .finally(() => setAccountsLoading(false));
   }, [queryClient]);
 
   // Remember the chosen account for the next visit.
@@ -307,6 +310,10 @@ export default function InboxPage() {
     }
   }
 
+  if (accountsLoading) {
+    return <InboxSkeleton />;
+  }
+
   return (
     <div className="space-y-4">
       <div className="flex items-end justify-between gap-4">
@@ -334,7 +341,17 @@ export default function InboxPage() {
           </div>
           <div className="min-h-0 flex-1 overflow-y-auto">
             {convLoading ? (
-              <p className="px-4 py-6 text-sm text-muted">{t("Loading…")}</p>
+              <div aria-busy="true" className="space-y-1 p-2">
+                {Array.from({ length: 6 }, (_, i) => (
+                  <div key={i} className="rounded-lg p-3">
+                    <div className="flex items-center justify-between gap-2">
+                      <Skeleton className="h-3.5 w-28 rounded" />
+                      <Skeleton className="h-2.5 w-10 rounded" />
+                    </div>
+                    <Skeleton className="mt-2 h-3 w-4/5 rounded" />
+                  </div>
+                ))}
+              </div>
             ) : convError ? (
               <p className="px-4 py-6 text-sm text-error">{convError === "Failed to load conversations" ? t("Failed to load conversations") : convError}</p>
             ) : conversations.length === 0 ? (
@@ -406,7 +423,11 @@ export default function InboxPage() {
                     {t("Instagram could not load the details of this conversation. Other conversations are still available. You can check this chat in Instagram.")}
                   </p>
                 ) : threadLoading && messages.length === 0 ? (
-                  <p className="text-sm text-muted">{t("Loading…")}</p>
+                  <div aria-busy="true" className="space-y-4 pt-3">
+                    <Skeleton className="h-10 w-2/3 rounded-2xl" />
+                    <Skeleton className="ml-auto h-10 w-1/2 rounded-2xl" />
+                    <Skeleton className="h-16 w-3/5 rounded-2xl" />
+                  </div>
                 ) : messages.length === 0 ? (
                   <p className="text-sm text-muted">{t("No messages.")}</p>
                 ) : (

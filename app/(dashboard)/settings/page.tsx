@@ -8,6 +8,7 @@ import { ZernioConnection } from "@/components/zernio-connection";
 import { InstagramConnectNotice } from "@/components/instagram-connect-notice";
 import ThemeSwitcher from "@/components/theme-switcher";
 import { AiConnection } from "@/components/ai-connection";
+import { SettingsSkeleton } from "@/components/loading-skeleton";
 
 interface SettingsData {
   workspace: {
@@ -126,7 +127,7 @@ export default function SettingsPage() {
   }
 
   if (loading) {
-    return <div className="panel rounded p-8 h-64" />;
+    return <SettingsSkeleton />;
   }
 
   const accounts = data?.instagramAccounts ?? [];

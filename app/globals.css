@@ -20,7 +20,7 @@
   --font-mono: ui-monospace, monospace;
 }
 
- :root {
+:root {
   --app-background: #f8fafc;
   --app-foreground: #172033;
   --app-surface: #ffffff;
@@ -28,6 +28,8 @@
   --app-border: #dbe2ea;
   --app-border-hover: #c3cedb;
   --app-muted: #637083;
+  --skeleton-base: #e8edf3;
+  --skeleton-highlight: #f8fafc;
 }
 
 html {
@@ -44,6 +46,8 @@ html[data-theme="dark"] {
   --app-border: #344050;
   --app-border-hover: #4c5a6c;
   --app-muted: #a6b2c2;
+  --skeleton-base: #252d38;
+  --skeleton-highlight: #3a4654;
 }
 
 html[data-theme="dark"] body {
@@ -80,6 +84,26 @@ body {
   background: var(--color-background);
   color: var(--color-foreground);
   font-family: var(--font-sans);
+}
+
+/* Content-shaped loading surfaces. The slow diagonal highlight makes the
+   waiting state feel alive without competing with the loaded interface. */
+.skeleton-shimmer {
+  background: linear-gradient(
+    105deg,
+    var(--skeleton-base) 0%,
+    var(--skeleton-base) 38%,
+    var(--skeleton-highlight) 50%,
+    var(--skeleton-base) 62%,
+    var(--skeleton-base) 100%
+  );
+  background-size: 220% 100%;
+  animation: skeleton-shimmer 1.65s ease-in-out infinite;
+}
+
+@keyframes skeleton-shimmer {
+  0% { background-position: 120% 0; }
+  100% { background-position: -120% 0; }
 }
 
 /* Focus ring — visible, for keyboard users. */
@@ -138,6 +162,11 @@ select:focus-visible {
   *::after {
     animation-duration: 0.01ms !important;
     transition-duration: 0.01ms !important;
+  }
+
+  .skeleton-shimmer {
+    animation: none;
+    background: var(--skeleton-base);
   }
 }
 

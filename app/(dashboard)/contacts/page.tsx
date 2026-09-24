@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useMemo, useState } from "react";
 import { useQuery } from "@tanstack/react-query";
 import { useI18n } from "@/lib/i18n/provider";
+import { ContactsSkeleton } from "@/components/loading-skeleton";
 
 type Contact = {
   commenterId: string;
@@ -44,6 +45,10 @@ export default function ContactsPage() {
       ].some((value) => value.toLowerCase().includes(normalized)),
     );
   }, [contacts, filter, query]);
+
+  if (loading) {
+    return <ContactsSkeleton />;
+  }
 
   function downloadContacts() {
     const rows = [
@@ -122,9 +127,7 @@ export default function ContactsPage() {
           {t("{count} contacts", { count: visibleContacts.length })}
         </p>
 
-        {loading ? (
-          <p className="py-8 text-center text-sm text-muted">{t("Loading…")}</p>
-        ) : visibleContacts.length === 0 ? (
+        {visibleContacts.length === 0 ? (
           <p className="py-8 text-center text-sm text-muted">
             {filter === "email" ? t("No contacts with email yet") : t("No contacts yet")}
           </p>

@@ -3,6 +3,7 @@
 import { useEffect, useId, useRef, useState } from "react";
 import Link from "next/link";
 import { useI18n } from "@/lib/i18n/provider";
+import { Skeleton } from "@/components/loading-skeleton";
 
 interface TemplateOptions {
   data: { id: string; name: string }[];
@@ -142,9 +143,11 @@ export default function NewCampaignMenu({
             )}
           </ul>
           {!options && !failed && (
-            <p role="status" className="px-3 py-2 text-sm text-muted">
-              {t("Loading…")}
-            </p>
+            <div role="status" aria-busy="true" className="space-y-2 px-3 py-3">
+              <Skeleton className="h-3.5 w-32 rounded" />
+              <Skeleton className="h-3.5 w-44 rounded" />
+              <Skeleton className="h-3.5 w-28 rounded" />
+            </div>
           )}
           {failed && (
             <div className="px-3 py-2 text-sm">

@@ -14,6 +14,7 @@ import { useRouter } from "next/navigation";
 import NewCampaignMenu from "@/components/new-campaign-menu";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import { readCache, writeCache } from "@/lib/client-cache";
+import { CampaignListSkeleton } from "@/components/loading-skeleton";
 
 interface Campaign {
   id: string;
@@ -267,13 +268,7 @@ export default function CampaignsPage() {
   }
 
   if (loading) {
-    return (
-      <div className="space-y-4">
-        {[...Array(3)].map((_, i) => (
-          <div key={i} className="panel rounded p-6 h-36" />
-        ))}
-      </div>
-    );
+    return <CampaignListSkeleton />;
   }
 
   const query = search.trim().toLowerCase();

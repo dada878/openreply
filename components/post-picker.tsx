@@ -12,6 +12,7 @@
 import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useState } from "react";
 import { readCache, writeCache } from "@/lib/client-cache";
+import { Skeleton } from "@/components/loading-skeleton";
 
 const PAGE_SIZE = 60;
 
@@ -106,7 +107,7 @@ export default function PostPicker({
     return (
       <div className="grid grid-cols-3 sm:grid-cols-4 gap-2">
         {[...Array(8)].map((_, i) => (
-          <div key={i} className="aspect-square rounded bg-surface" />
+          <Skeleton key={i} className="aspect-square rounded-lg" />
         ))}
       </div>
     );

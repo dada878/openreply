@@ -29,6 +29,7 @@ import {
 } from "@/lib/import-queue";
 import { Sparkles } from "lucide-react";
 import { PUBLIC_REPLY_AI_MODELS } from "@/lib/ai/public-reply";
+import { CampaignBuilderSkeleton } from "@/components/loading-skeleton";
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
@@ -758,7 +759,7 @@ export default function CampaignBuilder({
   }
 
   if (loading) {
-    return <div className="panel h-64 rounded" />;
+    return <CampaignBuilderSkeleton />;
   }
 
   if (notFound) {
