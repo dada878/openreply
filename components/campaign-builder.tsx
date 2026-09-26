@@ -30,6 +30,7 @@ import {
 import { Sparkles } from "lucide-react";
 import { PUBLIC_REPLY_AI_MODELS } from "@/lib/ai/public-reply";
 import { CampaignBuilderSkeleton } from "@/components/loading-skeleton";
+import AutoResizeTextarea from "@/components/auto-resize-textarea";
 
 type TriggerScope = "specific" | "any" | "next";
 type MatchMode = "specific" | "any";
@@ -1004,7 +1005,7 @@ export default function CampaignBuilder({
             <div className="space-y-2">
               {publicReplyMessages.map((msg, i) => (
                 <div key={i} className="flex items-center gap-2">
-                  <input
+                  <AutoResizeTextarea
                     value={msg}
                     onChange={(e) =>
                       setPublicReplyMessages((prev) =>
@@ -1013,6 +1014,8 @@ export default function CampaignBuilder({
                     }
                     placeholder={t("Sent you a DM! 📩")}
                     maxLength={1000}
+                    minRows={2}
+                    maxRows={15}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   />
                   {publicReplyMessages.length > 1 && (
@@ -1059,11 +1062,12 @@ export default function CampaignBuilder({
                 </div>
                 {aiPublicReplyEnabled && (
                   <div className="mt-3 space-y-2">
-                    <textarea
+                    <AutoResizeTextarea
                       value={aiPublicReplyPrompt}
                       onChange={(e) => setAiPublicReplyPrompt(e.target.value)}
                       placeholder={t("Write how the AI should reply to comments…")}
-                      rows={4}
+                      minRows={4}
+                      maxRows={15}
                       maxLength={2000}
                       className="w-full resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                     />
@@ -1138,11 +1142,12 @@ export default function CampaignBuilder({
             </div>
             {openingDmEnabled && (
               <div className="mt-3 space-y-2">
-                <textarea
+                <AutoResizeTextarea
                   value={openingDmMessage}
                   onChange={(e) => setOpeningDmMessage(e.target.value)}
                   placeholder={t("Hey there! I'm so happy you're here 😊")}
-                  rows={3}
+                  minRows={3}
+                  maxRows={15}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />
@@ -1169,11 +1174,12 @@ export default function CampaignBuilder({
             </div>
             {requireFollow && (
               <div className="mt-3 space-y-2">
-                <textarea
+                <AutoResizeTextarea
                   value={followPromptMessage}
                   onChange={(e) => setFollowPromptMessage(e.target.value)}
                   placeholder={t("quick favor before i send your link. i don't make any money from this, it's free. if you want to support me, just don't unfollow after, and star the repo on github if it helps you. tap the button once you're following and i'll send it over")}
-                  rows={3}
+                  minRows={3}
+                  maxRows={15}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />
@@ -1188,11 +1194,12 @@ export default function CampaignBuilder({
                   <span className="text-xs text-muted">
                     {t("Not-following reply")}
                   </span>
-                  <textarea
+                  <AutoResizeTextarea
                     value={followCheckFailedMessage}
                     onChange={(e) => setFollowCheckFailedMessage(e.target.value)}
                     placeholder={t("It looks like you haven't followed yet. Follow the account, then tap the button again.")}
-                    rows={2}
+                    minRows={2}
+                    maxRows={15}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                     maxLength={1000}
                   />
@@ -1216,11 +1223,12 @@ export default function CampaignBuilder({
             </div>
             {collectEmail && (
               <div className="mt-3 space-y-2">
-                <textarea
+                <AutoResizeTextarea
                   value={emailPromptMessage}
                   onChange={(e) => setEmailPromptMessage(e.target.value)}
                   placeholder={t("Reply with your email and I’ll send the content over.")}
-                  rows={3}
+                  minRows={3}
+                  maxRows={15}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />
@@ -1228,11 +1236,12 @@ export default function CampaignBuilder({
                   <span className="text-xs text-muted">
                     {t("Invalid email reply")}
                   </span>
-                  <textarea
+                  <AutoResizeTextarea
                     value={emailInvalidMessage}
                     onChange={(e) => setEmailInvalidMessage(e.target.value)}
                     placeholder={t("Please enter a valid email address.")}
-                    rows={2}
+                    minRows={2}
+                    maxRows={15}
                     className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                     maxLength={1000}
                   />
@@ -1248,11 +1257,12 @@ export default function CampaignBuilder({
         {(commentDmEnabled || dmTriggerEnabled) && <Section title={t("And then, they will get")}>
           <div className="rounded-lg border border-border p-3 space-y-2">
             <span className="text-sm text-foreground">{t("a DM with a link")}</span>
-            <textarea
+            <AutoResizeTextarea
               value={dmMessage}
               onChange={(e) => setDmMessage(e.target.value)}
               placeholder={t("Write a message")}
-              rows={3}
+              minRows={3}
+              maxRows={15}
               className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
               maxLength={1000}
             />
@@ -1376,11 +1386,12 @@ export default function CampaignBuilder({
             </div>
             {followUpEnabled && (
               <div className="mt-3 space-y-2">
-                <textarea
+                <AutoResizeTextarea
                   value={followUpMessage}
                   onChange={(e) => setFollowUpMessage(e.target.value)}
                   placeholder={t("Btw just wanted to say thanks for following me, I appreciate the support 🙌")}
-                  rows={3}
+                  minRows={3}
+                  maxRows={15}
                   className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none resize-none"
                   maxLength={1000}
                 />

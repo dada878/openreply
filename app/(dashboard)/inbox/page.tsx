@@ -19,6 +19,7 @@ import { readCache, writeCache } from "@/lib/client-cache";
 import type { ConversationListItem } from "@/app/api/instagram/conversations/route";
 import type { ThreadMessage } from "@/app/api/instagram/conversations/[id]/route";
 import { InboxSkeleton, Skeleton } from "@/components/loading-skeleton";
+import AutoResizeTextarea from "@/components/auto-resize-textarea";
 
 const POLL_MS = 12_000;
 // Cached list/threads are shown instantly on revisit, then revalidated in the
@@ -462,14 +463,15 @@ export default function InboxPage() {
                   <p className="mb-2 text-xs text-error">{sendError}</p>
                 )}
                 <div className="flex items-end gap-2">
-                  <textarea
+                  <AutoResizeTextarea
                     disabled={active.detailsUnavailable || !active.contact.id}
                     value={draft}
                     onChange={(e) => setDraft(e.target.value)}
                     onKeyDown={handleKeyDown}
-                    rows={1}
+                    minRows={1}
+                    maxRows={15}
                     placeholder={t("Write a reply…  (Enter to send, Shift+Enter for a new line)")}
-                    className="max-h-32 min-h-[40px] flex-1 resize-none rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
+                    className="min-h-[40px] flex-1 rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground placeholder:text-zinc-500 focus:border-accent/40 focus:outline-none"
                   />
                   <button
                     type="button"

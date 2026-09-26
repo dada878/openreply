@@ -12,6 +12,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { useEffect, useState } from "react";
 import { useRouter } from "next/navigation";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
+import AutoResizeTextarea from "@/components/auto-resize-textarea";
 import { parseCsv } from "@/lib/utils/csv";
 import { IMPORT_QUEUE_KEY, IMPORT_ACCOUNT_KEY } from "@/lib/import-queue";
 
@@ -124,12 +125,13 @@ export default function ImportCampaignsPage() {
 
       <div className="space-y-2">
         <label className="block text-sm font-medium text-foreground">CSV</label>
-        <textarea
+        <AutoResizeTextarea
           value={csv}
           onChange={(e) => setCsv(e.target.value)}
           placeholder={SAMPLE}
-          rows={10}
-          className="w-full px-4 py-3 rounded bg-surface border border-border text-sm font-mono text-foreground placeholder:text-zinc-600 focus:border-accent/40 focus:outline-none resize-y"
+          minRows={10}
+          maxRows={15}
+          className="w-full rounded bg-surface px-4 py-3 text-sm font-mono text-foreground placeholder:text-zinc-600 focus:border-accent/40 focus:outline-none"
         />
         <button
           type="button"
