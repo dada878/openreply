@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { MetaApiError, RateLimitError } from "@/lib/meta/client";
 import {
   isMetaPolicyBlock,
+  isMetaPolicyBlockMessage,
   shouldStopAutomaticRetry,
 } from "@/lib/instagram/delivery-errors";
 
@@ -24,5 +25,10 @@ describe("Meta policy-block delivery errors", () => {
     expect(
       isMetaPolicyBlock(new MetaApiError(100, undefined, undefined, "Invalid parameter")),
     ).toBe(false);
+  });
+
+  it("recognizes persisted policy-block messages for backlog release", () => {
+    expect(isMetaPolicyBlockMessage("Meta 368 [code=368 sub=4928002]")).toBe(true);
+    expect(isMetaPolicyBlockMessage("temporary provider throttle")).toBe(false);
   });
 });
