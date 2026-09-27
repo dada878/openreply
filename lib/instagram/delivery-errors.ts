@@ -28,6 +28,22 @@ export function isDeliveryUnconfirmed(
   );
 }
 
+/**
+ * Meta uses Graph error 368 for a policy or abuse block. It is represented by
+ * RateLimitError for historical compatibility, but unlike a normal 429/4/17
+ * throttle it must not be retried automatically.
+ */
+export function isMetaPolicyBlock(error: unknown): boolean {
+  return (
+    error instanceof RateLimitError &&
+    /\[code=368\b/.test(error.message)
+  );
+}
+
+export function shouldStopAutomaticRetry(error: unknown): boolean {
+  return isDeliveryUnconfirmed(error) || isMetaPolicyBlock(error);
+}
+
 // Only explicit rejections prove that no message was delivered. Meta code 1,
 // network failures, invalid responses and local persistence failures do not.
 export function isConfirmedSendRejection(error: unknown): boolean {

@@ -3,6 +3,7 @@ import {
   hasLegacyUnconfirmedDelivery,
   isConfirmedSendRejection,
   isDeliveryUnconfirmed,
+  shouldStopAutomaticRetry,
 } from "@/lib/instagram/delivery-errors";
 import { claimCommentDelivery, MAX_COMMENT_SEND_ATTEMPTS } from "./comment-delivery";
 import {
@@ -813,7 +814,13 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
                 commentId,
               },
             },
-            data: { publicReplyError: formatError(classifySendError(error)), publicReplyDeliveryUnconfirmed: !isConfirmedSendRejection(error) },
+            data: {
+              publicReplyError: formatError(classifySendError(error)),
+              // A Meta 368 policy block is a confirmed stop condition, but it
+              // is not a normal rejection we should retry on every poll.
+              publicReplyDeliveryUnconfirmed:
+                shouldStopAutomaticRetry(error) || !isConfirmedSendRejection(error),
+            },
           })
           .catch(() => {});
       }
@@ -1155,7 +1162,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           status: delivered ? "SENT" : "FAILED",
           ...(delivered ? { dmSentAt: new Date() } : {}),
           errorMessage: formatError(sendError),
-          dmDeliveryUnconfirmed: isDeliveryUnconfirmed(sendError),
+          dmDeliveryUnconfirmed: shouldStopAutomaticRetry(sendError),
         },
       });
       throw sendError;
@@ -1487,12 +1494,12 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
         commentId: dedupeId,
         status: "FAILED",
         errorMessage: formatError(error),
-        dmDeliveryUnconfirmed: isDeliveryUnconfirmed(error),
+        dmDeliveryUnconfirmed: shouldStopAutomaticRetry(error),
       },
       update: {
         status: "FAILED",
         errorMessage: formatError(error),
-        dmDeliveryUnconfirmed: isDeliveryUnconfirmed(error),
+        dmDeliveryUnconfirmed: shouldStopAutomaticRetry(error),
       },
     });
     throw error;
@@ -1967,13 +1974,13 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: isDeliveryUnconfirmed(error),
+          dmDeliveryUnconfirmed: shouldStopAutomaticRetry(error),
         },
         update: {
           status: "FAILED",
           attempts: job.attemptsMade + 1,
           errorMessage: formatError(error),
-          dmDeliveryUnconfirmed: isDeliveryUnconfirmed(error),
+          dmDeliveryUnconfirmed: shouldStopAutomaticRetry(error),
         },
       });
       throw error;
@@ -1998,8 +2005,11 @@ async function processJob(job: Job<DmQueueJob>): Promise<void> {
   try {
     await dispatchJob(job);
   } catch (error) {
-    if (isDeliveryUnconfirmed(error))
-      throw new UnrecoverableError(error.message);
+    if (shouldStopAutomaticRetry(error)) {
+      throw new UnrecoverableError(
+        error instanceof Error ? error.message : "Automatic retry stopped",
+      );
+    }
     throw error;
   }
 }
