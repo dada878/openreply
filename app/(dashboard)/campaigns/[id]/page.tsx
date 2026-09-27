@@ -43,6 +43,7 @@ interface Campaign {
   followUpButtonLabel: string | null;
   followUpDelayMinutes: number | null;
   publicReplyEnabled: boolean;
+  aiPublicReplyEnabled: boolean;
   publicReplyMessage: string | null;
   publicReplyMessages: string[];
   isActive: boolean;
@@ -463,6 +464,25 @@ export default function CampaignDetailPage() {
                     </table>
                   </div>
                 )}
+              </section>
+            )}
+            {campaign.aiPublicReplyEnabled && (
+              <section className="panel rounded p-4 sm:p-5">
+                <div className="flex flex-wrap items-center justify-between gap-3">
+                  <div>
+                    <h2 className="font-medium text-foreground">{t("AI public replies")}</h2>
+                    <p className="mt-1 text-sm text-muted">
+                      {t("Export each matched comment, AI input, generated output, timestamps, and available like counts.")}
+                    </p>
+                  </div>
+                  <a
+                    href={`/api/automations/${campaign.id}/ai-replies`}
+                    download
+                    className="rounded border border-border px-3 py-2 text-sm text-muted hover:text-foreground"
+                  >
+                    {t("Download AI reply CSV")}
+                  </a>
+                </div>
               </section>
             )}
           </div>

@@ -276,8 +276,15 @@ model DmLog {
 
   commenterId   String
   commenterName String?
+  commenterDisplayName String?
   commentText   String
   commentId     String
+  /// The timestamp supplied by Instagram for the original comment. Webhook
+  /// payloads may omit it, so exports fall back to createdAt when unavailable.
+  commentCreatedAt DateTime?
+  /// Snapshot of the comment's likes when the comment was ingested. This is
+  /// nullable because some providers/webhook payloads do not expose it.
+  commentLikeCount Int?
   matchedKeyword String?
   status        DmStatus @default(PENDING)
   attempts      Int      @default(0)
@@ -291,6 +298,11 @@ model DmLog {
   publicReplyDeliveryUnconfirmed Boolean @default(false)
   publicReplySentAt DateTime?
   publicReplyError  String?
+  /// The original comment and generated public reply, when AI public replies
+  /// were enabled and a model returned a usable response.
+  aiPublicReplyInput  String?
+  aiPublicReplyOutput String?
+  aiPublicReplyModel  String?
 
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt

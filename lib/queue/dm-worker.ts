@@ -84,6 +84,13 @@ function formatError(error: unknown): string {
   return "Unknown error";
 }
 
+type PublicReplyResolution = {
+  text: string;
+  aiPublicReplyInput?: string;
+  aiPublicReplyOutput?: string;
+  aiPublicReplyModel?: string;
+};
+
 async function resolvePublicReply({
   context,
   automation,
@@ -106,9 +113,9 @@ async function resolvePublicReply({
   displayName: string | null | undefined;
   commentText: string;
   fallback: string;
-}): Promise<string> {
+}): Promise<PublicReplyResolution> {
   if (!automation.aiPublicReplyEnabled || !automation.aiPublicReplyPrompt?.trim()) {
-    return fallback;
+    return { text: fallback };
   }
 
   let resolvedDisplayName = displayName ?? null;
@@ -127,24 +134,32 @@ async function resolvePublicReply({
 
   try {
     const aiSettings = await getWorkspaceAiSettings(automation.workspaceId);
+    const model = automation.aiPublicReplyModel ?? aiSettings.defaultModel ?? process.env.OPENAI_MODEL ?? "gpt-4o-mini";
     const generated = await generatePublicReply({
         apiKey: aiSettings.apiKey,
         prompt: automation.aiPublicReplyPrompt,
-        model: automation.aiPublicReplyModel ?? aiSettings.defaultModel,
+        model,
         username: resolvedUsername,
         displayName: resolvedDisplayName,
         commentText,
         accountUsername: automation.instagramAccount.username,
         existingReply: fallback,
       });
-    return (generated ?? fallback)
+    if (!generated) return { text: fallback };
+    const text = generated
       .replace(/\{username\}/gi, resolvedUsername ?? "there")
       .replace(/\{display_name\}/gi, resolvedDisplayName ?? resolvedUsername ?? "there")
       .replace(/\{account_name\}/gi, automation.instagramAccount.username)
       .replace(/\{comment\}/gi, commentText);
+    return {
+      text,
+      aiPublicReplyInput: commentText,
+      aiPublicReplyOutput: text,
+      aiPublicReplyModel: model,
+    };
   } catch (error) {
     console.warn("[DM Worker] AI public reply failed; using saved reply:", formatError(error));
-    return fallback;
+    return { text: fallback };
   }
 }
 
@@ -530,6 +545,21 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     originalMediaId,
   } = job.data;
   const requeueAttempt = job.data.requeueAttempt ?? 0;
+  const commentCreatedAt = job.data.commentCreatedAt
+    ? new Date(job.data.commentCreatedAt)
+    : undefined;
+  const commentMetadata = {
+    commenterDisplayName: commenterDisplayName ?? undefined,
+    commentCreatedAt:
+      commentCreatedAt && !Number.isNaN(commentCreatedAt.getTime())
+        ? commentCreatedAt
+        : undefined,
+    commentLikeCount:
+      typeof job.data.commentLikeCount === "number" &&
+      Number.isFinite(job.data.commentLikeCount)
+        ? Math.max(0, Math.trunc(job.data.commentLikeCount))
+        : undefined,
+  };
 
   const automations = await prisma.automation.findMany({
     where: {
@@ -634,6 +664,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           instagramAccountId: automation.instagramAccountId,
           commenterId,
           commenterName,
+          ...commentMetadata,
           commentText,
           commentId,
           matchedKeyword: matchResult.matchedKeyword,
@@ -641,6 +672,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           errorMessage: "No Instagram access token available",
         },
         update: {
+          ...commentMetadata,
           status: "FAILED",
           errorMessage: "No Instagram access token available",
         },
@@ -668,6 +700,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           instagramAccountId: automation.instagramAccountId,
           commenterId,
           commenterName,
+          ...commentMetadata,
           commentText,
           commentId,
           matchedKeyword: matchResult.matchedKeyword,
@@ -675,6 +708,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           errorMessage: "Failed to decrypt Instagram access token",
         },
         update: {
+          ...commentMetadata,
           status: "FAILED",
           errorMessage: "Failed to decrypt Instagram access token",
         },
@@ -688,7 +722,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         workspaceId: automation.workspaceId,
         automationId: automation.id,
         instagramAccountId: automation.instagramAccountId,
-        commenterId, commenterName, commentText, commentId,
+        commenterId, commenterName, ...commentMetadata, commentText, commentId,
         matchedKeyword: matchResult.matchedKeyword,
         status: "PENDING",
       },
@@ -719,7 +753,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         const chosen = replyPool.length > 0
           ? replyPool[Math.floor(Math.random() * replyPool.length)]
           : "Thanks for your comment!";
-        const generatedReply = await resolvePublicReply({
+        const replyResolution = await resolvePublicReply({
           context: accessToken,
           automation,
           userId: commenterId,
@@ -728,8 +762,23 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commentText,
           fallback: chosen,
         });
+        if (replyResolution.aiPublicReplyOutput) {
+          // Persist the model exchange before the external send. If Instagram
+          // rejects the reply, the audit export still shows what the model
+          // generated and the log status explains the delivery outcome.
+          await prisma.dmLog.update({
+            where: {
+              automationId_commentId: { automationId: automation.id, commentId },
+            },
+            data: {
+              aiPublicReplyInput: replyResolution.aiPublicReplyInput,
+              aiPublicReplyOutput: replyResolution.aiPublicReplyOutput,
+              aiPublicReplyModel: replyResolution.aiPublicReplyModel,
+            },
+          });
+        }
         const publicReply = renderMessageWithTracking({
-          message: generatedReply,
+          message: replyResolution.text,
           commenterName,
           trackedLinks: automation.trackedLinks,
           tracking,
@@ -744,7 +793,11 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           where: {
             automationId_commentId: { automationId: automation.id, commentId },
           },
-          data: { publicReplySentAt: new Date(), publicReplyError: null, publicReplyDeliveryUnconfirmed: false },
+          data: {
+            publicReplySentAt: new Date(),
+            publicReplyError: null,
+            publicReplyDeliveryUnconfirmed: false,
+          },
         });
         publicReplyCompleted = true;
       } catch (error) {

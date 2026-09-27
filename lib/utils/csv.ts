@@ -27,6 +27,18 @@ export function parseCsv(text: string): Record<string, string>[] {
   return out;
 }
 
+/**
+ * Serialize tabular data as RFC 4180-compatible CSV with a UTF-8 BOM so
+ * spreadsheet applications open Traditional Chinese and other Unicode text
+ * without guessing the encoding.
+ */
+export function stringifyCsv(headers: string[], rows: string[][]): string {
+  const quote = (value: string) => `"${value.replace(/"/g, '""')}"`;
+  return `\uFEFF${[headers, ...rows]
+    .map((row) => row.map((cell) => quote(cell ?? "")).join(","))
+    .join("\r\n")}\r\n`;
+}
+
 function parseRows(text: string): string[][] {
   const rows: string[][] = [];
   let field = "";

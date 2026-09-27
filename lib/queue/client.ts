@@ -30,6 +30,8 @@ export interface ProcessCommentJob {
   commenterId: string;
   commenterName?: string;
   commenterDisplayName?: string;
+  commentCreatedAt?: string;
+  commentLikeCount?: number;
   mediaId: string;
   // Set when the comment came from an ad: the organic post the ad was made
   // from. Campaigns are bound to that post, so both ids have to be matched.

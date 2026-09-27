@@ -73,6 +73,7 @@ export interface InstagramComment {
     name?: string;
   };
   timestamp: string;
+  like_count?: number;
   // Present when the comments query asks for replies{from}. Used to tell whether
   // the account owner has already replied to this comment.
   replies?: {
@@ -457,7 +458,7 @@ export async function getMediaComments(
   mediaId: string
 ): Promise<InstagramComment[]> {
   const url = new URL(`${instagramGraphBase()}/${mediaId}/comments`);
-  url.searchParams.set("fields", "id,text,from,timestamp");
+  url.searchParams.set("fields", "id,text,from,timestamp,like_count");
   url.searchParams.set("access_token", accessToken);
 
   const response = await fetch(url.toString());
@@ -485,7 +486,7 @@ export async function getRecentMediaComments(
   const results: InstagramComment[] = [];
 
   const first = new URL(`${instagramGraphBase()}/${mediaId}/comments`);
-  first.searchParams.set("fields", "id,text,timestamp,from,replies{from}");
+  first.searchParams.set("fields", "id,text,timestamp,from,like_count,replies{from}");
   first.searchParams.set("order", "reverse_chronological");
   first.searchParams.set("limit", "50");
   first.searchParams.set("access_token", accessToken);

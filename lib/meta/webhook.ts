@@ -39,6 +39,8 @@ export interface WebhookCommentEvent {
   commenterId: string;
   commenterName?: string;
   commenterDisplayName?: string;
+  commentCreatedAt?: string;
+  commentLikeCount?: number;
   mediaId: string;
   /**
    * Set only when the comment was left on an ad: the id of the organic post
@@ -57,6 +59,8 @@ interface WebhookEntry {
       id?: string;
       comment_id?: string;
       text?: string;
+      timestamp?: string;
+      like_count?: number;
       from?: {
         id?: string;
         username?: string;
@@ -155,6 +159,9 @@ export function parseCommentEvents(payload: WebhookPayload): WebhookCommentEvent
         commenterId,
         commenterName: value.from?.username,
         commenterDisplayName: value.from?.name,
+        commentCreatedAt: value.timestamp,
+        commentLikeCount:
+          typeof value.like_count === "number" ? value.like_count : undefined,
         mediaId,
         originalMediaId,
       });

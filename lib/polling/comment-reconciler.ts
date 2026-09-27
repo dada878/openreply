@@ -279,6 +279,8 @@ async function sweepCampaign({
         commenterId: c.from!.id,
         commenterName: c.from?.username,
         commenterDisplayName: c.from?.name,
+        commentCreatedAt: c.timestamp,
+        commentLikeCount: c.like_count,
         mediaId,
         // When the sweep is looking at an ad, the campaign is bound to the post
         // the ad was made from: without this the worker matches nothing and

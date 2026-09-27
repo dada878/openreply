@@ -6,6 +6,7 @@ type Comment = {
   id: string;
   message: string;
   createdTime: string;
+  likeCount?: number;
   from?: { id: string; username?: string; name?: string };
   replies?: Comment[];
 };
@@ -49,6 +50,7 @@ export async function getRecentMediaComments({
         id: c.id,
         text: c.message,
         timestamp: c.createdTime,
+        like_count: c.likeCount,
         from: c.from,
         replies: { data: c.replies?.map((r) => ({ id: r.id, from: r.from })) },
       }))

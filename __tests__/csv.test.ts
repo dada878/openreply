@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parseCsv, instagramShortcode } from "../lib/utils/csv";
+import { parseCsv, instagramShortcode, stringifyCsv } from "../lib/utils/csv";
 
 describe("parseCsv", () => {
   it("parses a simple file keyed by lowercased headers", () => {
@@ -44,5 +44,12 @@ describe("instagramShortcode", () => {
   it("returns null for non-post values", () => {
     expect(instagramShortcode("12345")).toBeNull();
     expect(instagramShortcode("https://example.com/foo")).toBeNull();
+  });
+});
+
+describe("stringifyCsv", () => {
+  it("preserves Unicode, commas, quotes, and newlines safely", () => {
+    expect(stringifyCsv(["input", "output"], [["你好, 阿明", '回覆 "收到"\n下一行']]))
+      .toBe('\uFEFF"input","output"\r\n"你好, 阿明","回覆 ""收到""\n下一行"\r\n');
   });
 });
