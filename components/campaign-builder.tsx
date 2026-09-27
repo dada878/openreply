@@ -18,6 +18,7 @@ import {
   MARKETING_TRACKING_PARAMS,
   type MarketingTrackingKey,
 } from "@/lib/tracking/marketing-params";
+import { CampaignCredentialSelect } from "@/components/campaign-credential-select";
 import AccountSelect, { type AccountOption } from "@/components/account-select";
 import PostPicker from "@/components/post-picker";
 import CampaignPreview, { type PreviewTab } from "@/components/campaign-preview";
@@ -74,6 +75,7 @@ interface LoadedCampaign {
   aiPublicReplyModel: string | null;
   isActive: boolean;
   instagramAccountId: string;
+  instagramCredentialId: string | null;
   trackedLinks?: { destinationUrl: string; label?: string | null }[];
 }
 
@@ -177,6 +179,7 @@ export default function CampaignBuilder({
   const [name, setName] = useState(template?.name ?? "");
   const [accounts, setAccounts] = useState<AccountOption[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState("");
+  const [instagramCredentialId, setInstagramCredentialId] = useState("");
 
   const [avatarUrl, setAvatarUrl] = useState<string | null>(null);
   const [isActive, setIsActive] = useState(true);
@@ -333,6 +336,7 @@ export default function CampaignBuilder({
         if (!c) return setNotFound(true);
         setName(c.name);
         setSelectedAccountId(c.instagramAccountId);
+        setInstagramCredentialId(c.instagramCredentialId ?? "");
         setTriggerScope(
           c.matchAnyPost ? "any" : c.pendingNextReel ? "next" : "specific"
         );
@@ -570,6 +574,7 @@ export default function CampaignBuilder({
     const payload = {
       name: name.trim() || `Campaign for @${username}`,
       instagramAccountId: selectedAccountId,
+      instagramCredentialId: instagramCredentialId || null,
       postId: triggerScope === "specific" ? postId : null,
       postUrl: triggerScope === "specific" ? postUrl : null,
       matchAnyPost: triggerScope === "any",
@@ -892,6 +897,7 @@ export default function CampaignBuilder({
                 value={selectedAccountId}
                 onChange={(id) => {
                   setSelectedAccountId(id);
+                  setInstagramCredentialId("");
                   setPostId(null);
                   setPostUrl(null);
                   setPostThumb(null);
@@ -902,6 +908,8 @@ export default function CampaignBuilder({
             </div>
           )}
         </div>
+
+        {mode !== "template" && <CampaignCredentialSelect accountId={selectedAccountId} value={instagramCredentialId} onChange={setInstagramCredentialId} />}
 
         <Section title={t("When someone comments on")}>
           <Radio

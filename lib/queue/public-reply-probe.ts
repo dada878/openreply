@@ -5,15 +5,16 @@ import { getRedisConnection } from "./client";
 // cannot turn a later policy block into a retry storm.
 const PROBE_TTL_SECONDS = 10 * 60;
 
-function probeKey(instagramAccountId: string): string {
-  return `instagram:public-reply-probe:${instagramAccountId}`;
+function probeKey(instagramAccountId: string, credentialId?: string | null): string {
+  return `instagram:public-reply-probe:${instagramAccountId}${credentialId ? `:${credentialId}` : ""}`;
 }
 
 export async function markPublicReplyProbeSuccess(
   instagramAccountId: string,
+  credentialId?: string | null,
 ): Promise<void> {
   await getRedisConnection().set(
-    probeKey(instagramAccountId),
+    probeKey(instagramAccountId, credentialId),
     new Date().toISOString(),
     "EX",
     PROBE_TTL_SECONDS,
@@ -22,12 +23,14 @@ export async function markPublicReplyProbeSuccess(
 
 export async function hasRecentPublicReplyProbe(
   instagramAccountId: string,
+  credentialId?: string | null,
 ): Promise<boolean> {
-  return Boolean(await getRedisConnection().exists(probeKey(instagramAccountId)));
+  return Boolean(await getRedisConnection().exists(probeKey(instagramAccountId, credentialId)));
 }
 
 export async function clearPublicReplyProbe(
   instagramAccountId: string,
+  credentialId?: string | null,
 ): Promise<void> {
-  await getRedisConnection().del(probeKey(instagramAccountId));
+  await getRedisConnection().del(probeKey(instagramAccountId, credentialId));
 }

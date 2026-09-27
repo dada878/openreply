@@ -173,8 +173,28 @@ model InstagramAccount {
   followConversions FollowConversion[]
   linkClicks  LinkClick[]
   followerSnapshots FollowerSnapshot[]
+  credentials InstagramCredential[]
 
   @@index([workspaceId])
+}
+
+/// Additional Instagram Login tokens. Never returned by the settings API.
+model InstagramCredential {
+  id                 String @id @default(cuid())
+  instagramAccountId String
+  name               String
+  appId              String
+  accessToken        String
+  tokenFingerprint   String
+  tokenExpiresAt     DateTime?
+  verifiedAt         DateTime @default(now())
+  refreshedAt        DateTime @default(now())
+  createdAt          DateTime @default(now())
+  instagramAccount   InstagramAccount @relation(fields: [instagramAccountId], references: [id], onDelete: Cascade)
+  automations        Automation[]
+
+  @@unique([instagramAccountId, tokenFingerprint])
+  @@index([instagramAccountId])
 }
 
 /// Daily follower total for one account. Instagram only retains ~30 days of
@@ -201,6 +221,8 @@ model Automation {
   id                 String   @id @default(cuid())
   workspaceId        String
   instagramAccountId String
+  instagramCredentialId String?
+  instagramCredential InstagramCredential? @relation(fields: [instagramCredentialId], references: [id], onDelete: Restrict)
 
   name           String
   goal           String?
@@ -266,6 +288,7 @@ model Automation {
   @@index([workspaceId])
   @@index([instagramAccountId])
   @@index([postId])
+  @@index([instagramCredentialId])
 }
 
 model DmLog {

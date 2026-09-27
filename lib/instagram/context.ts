@@ -1,5 +1,6 @@
 import { decryptToken } from "@/lib/meta/oauth";
 import { prisma } from "@/lib/db/client";
+import { resolveInstagramCredential } from "./credentials";
 
 export type InstagramContext =
   | { provider: "META"; accessToken: string }
@@ -29,8 +30,13 @@ export function hasInstagramCredentials(
 
 export async function createInstagramContext(
   account: ProviderAccount,
-  operationId?: string
+  operationId?: string,
+  credentialId?: string | null,
 ): Promise<InstagramContext> {
+  if (credentialId) {
+    if (account.provider !== "META") throw new Error("Meta credentials require a Meta account connection");
+    return { provider: "META", accessToken: await resolveInstagramCredential(credentialId, account.workspaceId, account.instagramId) };
+  }
   if (account.provider !== "ZERNIO")
     return { provider: "META", accessToken: decryptToken(account.accessToken) };
   if (!account.zernioAccountId)

@@ -77,6 +77,7 @@ export async function reconcileComments(): Promise<void> {
     select: {
       id: true,
       name: true,
+      instagramCredentialId: true,
       postId: true,
       matchAnyPost: true,
       matchAnyWord: true,
@@ -129,6 +130,7 @@ async function sweepCampaign({
   automation: {
     id: string;
     name: string;
+    instagramCredentialId?: string | null;
     postId: string | null;
     matchAnyPost: boolean;
     matchAnyWord: boolean;
@@ -162,14 +164,15 @@ async function sweepCampaign({
   };
 
   // Decrypt the account token once per sweep.
-  let accessToken = tokenCache.get(account.id);
+  const tokenCacheKey = `${account.id}:${automation.instagramCredentialId ?? "default"}`;
+  let accessToken = tokenCache.get(tokenCacheKey);
   if (accessToken === undefined) {
     try {
-      accessToken = await createInstagramContext(account);
+      accessToken = await createInstagramContext(account, undefined, automation.instagramCredentialId);
     } catch {
       accessToken = null;
     }
-    tokenCache.set(account.id, accessToken);
+    tokenCache.set(tokenCacheKey, accessToken);
   }
   if (!accessToken) {
     stat.errors.push("Failed to decrypt access token");
@@ -181,6 +184,7 @@ async function sweepCampaign({
   // without a blind retry loop.
   const publicReplyProbeSucceeded = await hasRecentPublicReplyProbe(
     account.instagramId,
+    automation.instagramCredentialId,
   ).catch(() => false);
 
   // Which media this campaign covers: its own post, or the recent feed if it

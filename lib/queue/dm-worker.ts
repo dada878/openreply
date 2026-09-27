@@ -656,7 +656,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
       continue;
     }
 
-    if (!hasInstagramCredentials(automation.instagramAccount)) {
+    if (!automation.instagramCredentialId && !hasInstagramCredentials(automation.instagramAccount)) {
       await prisma.dmLog.upsert({
         where: {
           automationId_commentId: {
@@ -690,7 +690,8 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
     try {
       accessToken = await createInstagramContext(
         automation.instagramAccount,
-        `${job.id}:${automation.id}`
+        `${job.id}:${automation.id}`,
+        automation.instagramCredentialId,
       );
     } catch {
       await prisma.dmLog.upsert({
@@ -711,12 +712,12 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           commentId,
           matchedKeyword: matchResult.matchedKeyword,
           status: "FAILED",
-          errorMessage: "Failed to decrypt Instagram access token",
+          errorMessage: "Instagram credential unavailable or could not be decrypted",
         },
         update: {
           ...commentMetadata,
           status: "FAILED",
-          errorMessage: "Failed to decrypt Instagram access token",
+          errorMessage: "Instagram credential unavailable or could not be decrypted",
         },
       });
       continue;
@@ -807,7 +808,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
         });
         // Probe bookkeeping is advisory. A Redis hiccup must never turn an
         // already-successful Instagram reply into a delivery failure.
-        await markPublicReplyProbeSuccess(instagramAccountId).catch(() => {});
+        await markPublicReplyProbeSuccess(instagramAccountId, automation.instagramCredentialId).catch(() => {});
         publicReplyCompleted = true;
       } catch (error) {
         console.error(
@@ -815,7 +816,7 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           formatError(error)
         );
         if (isMetaPolicyBlock(error)) {
-          await clearPublicReplyProbe(instagramAccountId).catch(() => {});
+          await clearPublicReplyProbe(instagramAccountId, automation.instagramCredentialId).catch(() => {});
         }
         await prisma.dmLog
           .update({
@@ -1244,7 +1245,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   if (
     !automation ||
     automation.instagramAccount.instagramId !== instagramAccountId ||
-    !hasInstagramCredentials(automation.instagramAccount)
+    (!automation.instagramCredentialId && !hasInstagramCredentials(automation.instagramAccount))
   ) {
     return;
   }
@@ -1281,6 +1282,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
     accessToken = await createInstagramContext(
       automation.instagramAccount,
       `${job.id}:${automation.id}`,
+      automation.instagramCredentialId,
     );
   } catch {
     return;
@@ -1535,7 +1537,7 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
     !automation.followUpEnabled ||
     !automation.followUpMessage?.trim() ||
     automation.instagramAccount.instagramId !== instagramAccountId ||
-    !hasInstagramCredentials(automation.instagramAccount)
+    (!automation.instagramCredentialId && !hasInstagramCredentials(automation.instagramAccount))
   ) {
     return;
   }
@@ -1544,7 +1546,8 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   try {
     accessToken = await createInstagramContext(
       automation.instagramAccount,
-      `${job.id}:${automation.id}`
+      `${job.id}:${automation.id}`,
+      automation.instagramCredentialId,
     );
   } catch {
     return;
@@ -1661,12 +1664,13 @@ async function processPendingEmailCaptures(job: Job<ProcessMessageJob>): Promise
   const email = normalizeCapturedEmail(messageText);
   for (const capture of captures) {
     const automation = capture.automation;
-    if (!hasInstagramCredentials(automation.instagramAccount)) continue;
+    if (!automation.instagramCredentialId && !hasInstagramCredentials(automation.instagramAccount)) continue;
     let accessToken: InstagramContext;
     try {
       accessToken = await createInstagramContext(
         automation.instagramAccount,
         `${job.id}:${automation.id}`,
+        automation.instagramCredentialId,
       );
     } catch {
       continue;
@@ -1785,7 +1789,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
       matchedKeyword: matchResult.matchedKeyword,
     };
 
-    if (!hasInstagramCredentials(automation.instagramAccount)) {
+    if (!automation.instagramCredentialId && !hasInstagramCredentials(automation.instagramAccount)) {
       await prisma.dmLog.upsert({
         where: {
           automationId_commentId: {
@@ -1810,7 +1814,8 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
     try {
       accessToken = await createInstagramContext(
         automation.instagramAccount,
-        `${job.id}:${automation.id}`
+        `${job.id}:${automation.id}`,
+        automation.instagramCredentialId,
       );
     } catch {
       await prisma.dmLog.upsert({
@@ -1823,11 +1828,11 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
         create: {
           ...logBase,
           status: "FAILED",
-          errorMessage: "Failed to decrypt Instagram access token",
+          errorMessage: "Instagram credential unavailable or could not be decrypted",
         },
         update: {
           status: "FAILED",
-          errorMessage: "Failed to decrypt Instagram access token",
+          errorMessage: "Instagram credential unavailable or could not be decrypted",
         },
       });
       continue;

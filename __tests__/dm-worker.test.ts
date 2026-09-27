@@ -21,6 +21,7 @@ const {
   mockGeneratePublicReply,
 } = vi.hoisted(() => ({
   mockPrisma: {
+    instagramCredential: { findFirst: vi.fn() },
     zernioConnection: { findUnique: vi.fn() },
     postbackDelivery: { create: vi.fn(), delete: vi.fn() },
     automation: {
@@ -188,6 +189,8 @@ const mockAutomation = {
   publicReplyMessages: [],
   instagramAccount: {
     id: "ig_account_row_1",
+    provider: "META",
+    workspaceId: "workspace_123",
     instagramId: "ig_456",
     accessToken: "encrypted_token_abc",
   },
@@ -246,6 +249,7 @@ function createMockPostbackJob(
 
 beforeEach(() => {
   vi.clearAllMocks();
+  mockPrisma.instagramCredential.findFirst.mockReset().mockResolvedValue(null);
   mockPrisma.postbackDelivery.create.mockReset().mockResolvedValue({});
   mockPrisma.postbackDelivery.delete.mockReset().mockResolvedValue({});
 
@@ -329,6 +333,33 @@ beforeEach(() => {
     message_id: "msg_006",
   });
   mockGetUserFollowStatus.mockResolvedValue(true);
+});
+
+it("sends public and private comment replies using the campaign's selected credential", async () => {
+  const { sendCommentReply } = await import("@/lib/meta/client");
+  vi.mocked(sendCommentReply).mockReset().mockResolvedValue({ id: "public-reply" });
+  mockPrisma.instagramCredential.findFirst.mockResolvedValue({ accessToken: "encrypted-second-app", tokenExpiresAt: null });
+  mockDecryptToken.mockImplementation((value: string) => value === "encrypted-second-app" ? "second-app-token" : "default-token");
+  mockPrisma.automation.findMany.mockResolvedValue([{
+    ...mockAutomation, instagramCredentialId: "second-app", publicReplyEnabled: true, publicReplyMessages: ["Thanks!"],
+  }]);
+  await getProcessor()(createMockJob());
+  expect(sendCommentReply).toHaveBeenCalledWith("second-app-token", "comment_555", "Thanks!");
+  expect(mockSendPrivateReply).toHaveBeenCalledWith("second-app-token", "ig_456", "comment_555", expect.any(String));
+});
+
+it("does not fall back to the account token when the campaign credential is missing", async () => {
+  const { sendCommentReply } = await import("@/lib/meta/client");
+  vi.mocked(sendCommentReply).mockReset();
+  mockPrisma.automation.findMany.mockResolvedValue([{
+    ...mockAutomation, instagramCredentialId: "missing", publicReplyEnabled: true, publicReplyMessages: ["Thanks!"],
+  }]);
+  await getProcessor()(createMockJob());
+  expect(sendCommentReply).not.toHaveBeenCalled();
+  expect(mockSendPrivateReply).not.toHaveBeenCalled();
+  expect(mockPrisma.dmLog.upsert).toHaveBeenCalledWith(expect.objectContaining({
+    create: expect.objectContaining({ status: "FAILED", errorMessage: expect.stringContaining("credential unavailable") }),
+  }));
 });
 
 describe("DM Worker — comments left on an ad", () => {

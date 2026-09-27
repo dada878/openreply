@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { prisma } from "@/lib/db/client";
 import { decryptToken, encryptToken } from "@/lib/meta/oauth";
 import { refreshLongLivedToken } from "@/lib/meta/client";
+import { createHash } from "node:crypto";
 
 const DAYS_BEFORE_EXPIRY = 10;
 
@@ -95,6 +96,34 @@ export async function GET(request: NextRequest) {
         status: "failed",
         error: errorMessage,
       });
+    }
+  }
+
+  // Developer-dashboard tokens may not report their expiry at import time.
+  // Refresh those after a week; a successful refresh supplies a real expiry.
+  const credentials = await prisma.instagramCredential.findMany({
+    where: { OR: [
+      { tokenExpiresAt: { lte: cutoffDate } },
+      { tokenExpiresAt: null, refreshedAt: { lte: new Date(Date.now() - 7 * 86400_000) } },
+    ] },
+    include: { instagramAccount: { select: { workspaceId: true } } },
+  });
+  for (const credential of credentials) {
+    try {
+      const { accessToken, expiresIn } = await refreshLongLivedToken(decryptToken(credential.accessToken));
+      await prisma.instagramCredential.update({
+        where: { id: credential.id },
+        data: { accessToken: encryptToken(accessToken),
+          tokenFingerprint: createHash("sha256").update(accessToken).digest("hex"),
+          tokenExpiresAt: new Date(Date.now() + expiresIn * 1000), refreshedAt: new Date(),
+        },
+      });
+    } catch {
+      await prisma.operationalEvent.create({ data: {
+        workspaceId: credential.instagramAccount.workspaceId, source: "TOKEN_REFRESH", level: "ERROR",
+        message: `Token refresh failed for Instagram credential ${credential.name}`,
+        payload: { credentialId: credential.id, instagramAccountId: credential.instagramAccountId },
+      } });
     }
   }
 

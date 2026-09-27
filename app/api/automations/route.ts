@@ -2,6 +2,7 @@ import { NextRequest, NextResponse } from "next/server";
 import { z } from "zod";
 import { getCurrentWorkspaceId } from "@/lib/auth";
 import { prisma } from "@/lib/db/client";
+import { canUseInstagramCredential } from "@/lib/instagram/credentials";
 import { calculateCtr, normalizeTopKeywords } from "@/lib/tracking/analytics";
 import { buildTrackedUrl } from "@/lib/tracking/message";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
@@ -24,6 +25,7 @@ const createAutomationSchema = z
     name: z.string().min(1).max(100),
     goal: z.string().min(1).max(120).optional().nullable(),
     instagramAccountId: z.string().min(1).optional().nullable(),
+    instagramCredentialId: z.string().min(1).optional().nullable(),
     postId: z.string().min(1).optional().nullable(),
     postUrl: z.string().url().optional().nullable(),
     trackingParamKeys: z.array(z.enum(["account_name", "account_id", "campaign_id", "event_id", "video_id", "commenter_id"])).max(6).optional().default([]),
@@ -111,6 +113,7 @@ const createAutomationSchema = z
   );
 
 const updateAutomationSchema = z.object({
+  instagramCredentialId: z.string().min(1).optional().nullable(),
   name: z.string().min(1).max(100).optional(),
   goal: z.string().min(1).max(120).optional().nullable(),
   postId: z.string().min(1).optional().nullable(),
@@ -402,6 +405,10 @@ export async function POST(request: NextRequest) {
     );
   }
 
+  if (parsed.data.instagramCredentialId && !await canUseInstagramCredential(parsed.data.instagramCredentialId, instagramAccount.id, workspaceId)) {
+    return NextResponse.json({ success: false, error: "所選憑證不存在、已過期，或不屬於此 Instagram 帳號。" }, { status: 400 });
+  }
+
   const linkCreates = buildInitialCampaignLinks({
     workspaceId,
     primaryUrl: parsed.data.trackedDestinationUrl,
@@ -498,6 +505,7 @@ export async function POST(request: NextRequest) {
       wholeWordMatch: parsed.data.wholeWordMatch,
       workspaceId,
       instagramAccountId: instagramAccount.id,
+      instagramCredentialId: parsed.data.instagramCredentialId ?? null,
       reportShareSlug: generateReportShareSlug(),
       ...(linkCreates.length > 0
         ? { trackedLinks: { create: linkCreates } }
@@ -563,6 +571,10 @@ export async function PATCH(request: NextRequest) {
       { success: false, error: "Campaign not found" },
       { status: 404 }
     );
+  }
+
+  if (parsed.data.instagramCredentialId && !await canUseInstagramCredential(parsed.data.instagramCredentialId, existing.instagramAccountId, workspaceId)) {
+    return NextResponse.json({ success: false, error: "所選憑證不存在、已過期，或不屬於此 Instagram 帳號。" }, { status: 400 });
   }
 
   const {
