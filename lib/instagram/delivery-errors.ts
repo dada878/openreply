@@ -36,8 +36,14 @@ export function isDeliveryUnconfirmed(
 export function isMetaPolicyBlock(error: unknown): boolean {
   return (
     error instanceof RateLimitError &&
-    /\[code=368\b/.test(error.message)
+    isMetaPolicyBlockMessage(error.message)
   );
+}
+
+export function isMetaPolicyBlockMessage(
+  message: string | null | undefined,
+): boolean {
+  return Boolean(message && /\[code=368\b/.test(message));
 }
 
 export function shouldStopAutomaticRetry(error: unknown): boolean {

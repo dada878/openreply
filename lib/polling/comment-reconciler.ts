@@ -26,7 +26,10 @@
  */
 
 import { MAX_COMMENT_SEND_ATTEMPTS } from "@/lib/queue/comment-delivery";
-import { hasLegacyUnconfirmedDelivery } from "@/lib/instagram/delivery-errors";
+import {
+  hasLegacyUnconfirmedDelivery,
+  isMetaPolicyBlockMessage,
+} from "@/lib/instagram/delivery-errors";
 import { prisma } from "@/lib/db/client";
 import { getDMQueue } from "@/lib/queue/client";
 import {
@@ -40,6 +43,7 @@ import {
   type InstagramContext,
 } from "@/lib/instagram/provider";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
+import { hasRecentPublicReplyProbe } from "@/lib/queue/public-reply-probe";
 
 // Only consider comments from the last few days — older ones are outside
 // Instagram's private-reply window anyway, so a DM to them would just fail.
@@ -171,6 +175,13 @@ async function sweepCampaign({
     stat.errors.push("Failed to decrypt access token");
     return stat;
   }
+  // A successful reply from a newly-arrived comment is the only signal that
+  // the account may have recovered from Meta's 368 policy block. When present,
+  // release a bounded batch of old 368 failures below so the backlog drains
+  // without a blind retry loop.
+  const publicReplyProbeSucceeded = await hasRecentPublicReplyProbe(
+    account.instagramId,
+  ).catch(() => false);
 
   // Which media this campaign covers: its own post, or the recent feed if it
   // matches any post.
@@ -247,7 +258,7 @@ async function sweepCampaign({
       select: {
         commentId: true, status: true, attempts: true, errorMessage: true,
         dmDeliveryUnconfirmed: true, publicReplySentAt: true,
-        publicReplyDeliveryUnconfirmed: true,
+        publicReplyDeliveryUnconfirmed: true, publicReplyError: true,
       },
     });
     const handledSet = new Set(logs.filter((log) => {
@@ -255,7 +266,10 @@ async function sweepCampaign({
         log.dmDeliveryUnconfirmed || log.attempts >= MAX_COMMENT_SEND_ATTEMPTS ||
         (log.status === "FAILED" && hasLegacyUnconfirmedDelivery(log.errorMessage));
       const replyStopped = !automation.publicReplyEnabled ||
-        log.publicReplySentAt || log.publicReplyDeliveryUnconfirmed;
+        log.publicReplySentAt ||
+        (log.publicReplyDeliveryUnconfirmed &&
+          !(publicReplyProbeSucceeded &&
+            isMetaPolicyBlockMessage(log.publicReplyError)));
       return dmStopped && replyStopped;
     }).map((log) => log.commentId));
 
@@ -264,6 +278,20 @@ async function sweepCampaign({
       .filter((c) => !handledSet.has(c.id))
       .sort((a, b) => Date.parse(a.timestamp) - Date.parse(b.timestamp))
       .slice(0, MAX_NEW_PER_SWEEP);
+
+    if (publicReplyProbeSucceeded && fresh.length > 0) {
+      // Clear only the bounded batch we are about to enqueue. If Meta blocks
+      // again, the worker clears the probe key and the next sweep stops here.
+      await prisma.dmLog.updateMany({
+        where: {
+          automationId: automation.id,
+          commentId: { in: fresh.map((comment) => comment.id) },
+          publicReplyDeliveryUnconfirmed: true,
+          publicReplyError: { contains: "[code=368" },
+        },
+        data: { publicReplyDeliveryUnconfirmed: false },
+      });
+    }
 
     for (const c of fresh) {
       // No deterministic jobId here: a retained completed/failed job from an

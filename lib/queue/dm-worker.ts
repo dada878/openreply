@@ -3,6 +3,7 @@ import {
   hasLegacyUnconfirmedDelivery,
   isConfirmedSendRejection,
   isDeliveryUnconfirmed,
+  isMetaPolicyBlock,
   shouldStopAutomaticRetry,
 } from "@/lib/instagram/delivery-errors";
 import { claimCommentDelivery, MAX_COMMENT_SEND_ATTEMPTS } from "./comment-delivery";
@@ -70,6 +71,10 @@ import {
 } from "@/lib/tracking/message";
 import { appendMarketingTrackingParams, type MarketingTrackingContext } from "@/lib/tracking/marketing-params";
 import { TRACKED_LINK_ORDER } from "@/lib/tracking/link-order";
+import {
+  clearPublicReplyProbe,
+  markPublicReplyProbeSuccess,
+} from "./public-reply-probe";
 
 import { ZernioApiError } from "@/lib/zernio/client";
 
@@ -800,12 +805,18 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
             publicReplyDeliveryUnconfirmed: false,
           },
         });
+        // Probe bookkeeping is advisory. A Redis hiccup must never turn an
+        // already-successful Instagram reply into a delivery failure.
+        await markPublicReplyProbeSuccess(instagramAccountId).catch(() => {});
         publicReplyCompleted = true;
       } catch (error) {
         console.error(
           "[DM Worker] Public comment reply failed:",
           formatError(error)
         );
+        if (isMetaPolicyBlock(error)) {
+          await clearPublicReplyProbe(instagramAccountId).catch(() => {});
+        }
         await prisma.dmLog
           .update({
             where: {
