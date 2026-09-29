@@ -82,6 +82,7 @@ model Workspace {
   instagramAccounts InstagramAccount[]
   automations       Automation[]
   campaignTemplates CampaignTemplate[]
+  sharedFollowUps SharedFollowUp[]
   dmLogs            DmLog[]
   emailCaptures     EmailCapture[]
   followConversions  FollowConversion[]
@@ -558,4 +559,41 @@ model ZernioConnection {
 model PostbackDelivery {
   id String @id
   createdAt DateTime @default(now())
+}
+
+model SharedFollowUp {
+  id String @id @default(cuid())
+  workspaceId String
+  name String
+  variants Json
+  selectionMode String @default("RANDOM")
+  allowRepeat Boolean @default(false)
+  delayMinutes Int @default(3)
+  isActive Boolean @default(false)
+  archivedAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  deliveries SharedFollowUpDelivery[]
+  @@index([workspaceId, createdAt])
+}
+
+model SharedFollowUpDelivery {
+  id String @id @default(cuid())
+  followUpId String
+  automationId String
+  instagramAccountId String
+  userId String
+  commenterName String?
+  dedupeKey String @unique
+  variant Json
+  dueAt DateTime
+  status String @default("PENDING")
+  errorMessage String?
+  sentAt DateTime?
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
+  followUp SharedFollowUp @relation(fields: [followUpId], references: [id], onDelete: Cascade)
+  @@index([followUpId, instagramAccountId, userId])
+  @@index([status, dueAt])
 }

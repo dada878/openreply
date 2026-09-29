@@ -1,3 +1,4 @@
+import { enqueueDueFollowUps } from "@/lib/follow-ups/delivery";
 import { createDMWorker } from "@/lib/queue/dm-worker";
 import { recordWorkerHeartbeat } from "@/lib/ops/worker-health";
 import { reconcileComments } from "@/lib/polling/comment-reconciler";
@@ -10,7 +11,7 @@ const HEARTBEAT_INTERVAL_MS = 30_000;
 // Polling safety net for comments that webhooks miss. Runs in the worker because
 // it must fire every few minutes and Vercel's free crons only run once a day.
 const POLL_INTERVAL_MS = Number(
-  process.env.COMMENT_POLL_INTERVAL_MS ?? 5 * 60_000
+  process.env.COMMENT_POLL_INTERVAL_MS ?? 5 * 60_000,
 );
 
 console.log("[DM Worker] Started");
@@ -28,8 +29,26 @@ async function heartbeat() {
   }
 }
 
+let followUpSweepRunning = false;
+async function sweepFollowUps() {
+  if (followUpSweepRunning) return;
+  followUpSweepRunning = true;
+  try {
+    await enqueueDueFollowUps();
+  } catch (error) {
+    console.error("[DM Worker] Shared follow-up sweep failed:", error);
+  } finally {
+    followUpSweepRunning = false;
+  }
+}
+void sweepFollowUps();
+const followUpTimer = setInterval(() => void sweepFollowUps(), 15_000);
+
 void heartbeat();
-const heartbeatTimer = setInterval(() => void heartbeat(), HEARTBEAT_INTERVAL_MS);
+const heartbeatTimer = setInterval(
+  () => void heartbeat(),
+  HEARTBEAT_INTERVAL_MS,
+);
 
 async function poll() {
   try {
@@ -51,6 +70,7 @@ const pollTimer = setInterval(() => void poll(), POLL_INTERVAL_MS);
 async function shutdown(signal: string) {
   console.log(`[DM Worker] ${signal} received, closing worker`);
   clearInterval(heartbeatTimer);
+  clearInterval(followUpTimer);
   clearInterval(pollTimer);
   await worker.close();
   process.exit(0);

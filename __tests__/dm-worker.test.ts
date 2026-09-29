@@ -21,6 +21,7 @@ const {
   mockGeneratePublicReply,
 } = vi.hoisted(() => ({
   mockPrisma: {
+    sharedFollowUp: { findFirst: vi.fn().mockResolvedValue(null) },
     instagramCredential: { findFirst: vi.fn() },
     zernioConnection: { findUnique: vi.fn() },
     postbackDelivery: { create: vi.fn(), delete: vi.fn() },
@@ -70,6 +71,13 @@ const {
   mockReleaseWorkspaceDMReservation: vi.fn(),
   mockRecordFollowConversion: vi.fn(),
   mockGeneratePublicReply: vi.fn(),
+}));
+
+vi.mock("@/lib/follow-ups/delivery", () => ({
+  scheduleSharedFollowUp: vi.fn().mockResolvedValue(false),
+  recordFollowUpInteraction: vi.fn(),
+  processSharedFollowUp: vi.fn(),
+  SHARED_FOLLOWUP_JOB: "shared-followup",
 }));
 
 vi.mock("@/lib/db/client", () => ({
@@ -1845,4 +1853,24 @@ it("uses AI for a public reply without sending a private DM when comment DMs are
       data: expect.objectContaining({ status: "SKIPPED_DM_DISABLED" }),
     }),
   );
+});
+
+describe("shared promotions are scheduled only after resource delivery", () => {
+  it("schedules after a successful direct resource reply", async () => {
+    const { scheduleSharedFollowUp } = await import("@/lib/follow-ups/delivery");
+    await getProcessor()(createMockJob());
+    expect(scheduleSharedFollowUp).toHaveBeenCalledWith(expect.objectContaining({ sourceKey: "comment:comment_555", userId: "commenter_999" }));
+  });
+  it("does not schedule after an opening prompt", async () => {
+    const { scheduleSharedFollowUp } = await import("@/lib/follow-ups/delivery");
+    mockPrisma.automation.findMany.mockResolvedValue([{ ...mockAutomation, openingDmEnabled: true, openingDmMessage: "Tap to receive", openingDmButtonLabel: "Continue" }]);
+    await getProcessor()(createMockJob());
+    expect(scheduleSharedFollowUp).not.toHaveBeenCalled();
+  });
+  it("does not schedule after a provider rejection", async () => {
+    const { scheduleSharedFollowUp } = await import("@/lib/follow-ups/delivery");
+    mockSendPrivateReply.mockRejectedValueOnce(new Error("Unavailable"));
+    await getProcessor()(createMockJob()).catch(() => undefined);
+    expect(scheduleSharedFollowUp).not.toHaveBeenCalled();
+  });
 });

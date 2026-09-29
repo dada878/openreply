@@ -74,6 +74,7 @@ export interface ProcessMessageJob {
 }
 
 export type DmQueueJob =
+  | { deliveryId: string; accountConnectionId?: string; instagramAccountId?: string }
   | ProcessCommentJob
   | ProcessPostbackJob
   | ProcessFollowUpJob

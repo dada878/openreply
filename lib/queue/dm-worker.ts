@@ -1,3 +1,4 @@
+import { scheduleSharedFollowUp, recordFollowUpInteraction, processSharedFollowUp, SHARED_FOLLOWUP_JOB } from "@/lib/follow-ups/delivery";
 import {
   classifySendError,
   hasLegacyUnconfirmedDelivery,
@@ -463,11 +464,14 @@ async function scheduleFollowUp({
   automation,
   userId,
   commenterName,
+  sourceKey,
 }: {
+  sourceKey: string;
   automation: EmailGateAutomation;
   userId: string;
   commenterName: string | null;
 }) {
+  if (await scheduleSharedFollowUp({ automation, userId, commenterName, sourceKey })) return;
   if (!automation.followUpEnabled || !automation.followUpMessage?.trim()) return;
   await getDMQueue().add(
     FOLLOWUP_JOB_NAME,
@@ -519,7 +523,7 @@ async function deliverCapturedEmailContent({
       context: "email capture",
     });
     await markEmailContentDelivered(captureId);
-    await scheduleFollowUp({ automation, userId, commenterName });
+    await scheduleFollowUp({ automation, userId, commenterName, sourceKey: `email:${captureId}` });
   } catch (originalError) {
     const error = classifySendError(originalError);
     if (isConfirmedSendRejection(error)) {
@@ -1161,6 +1165,9 @@ async function processComment(job: Job<ProcessCommentJob>): Promise<void> {
           errorMessage: null,
         },
       });
+      if (!useOpeningDm && !sendFollowPrompt && !automation.collectEmail) {
+        await scheduleSharedFollowUp({ automation, userId: commenterId, commenterName: commenterName ?? null, sourceKey: `comment:${commentId}` });
+      }
     } catch (error) {
       const sendError = classifySendError(error);
       // Retain reservations if the provider may have delivered the message.
@@ -1222,6 +1229,7 @@ async function sendPostbackOnce({
  */
 async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
   const { instagramAccountId, userId, payload, fallback } = job.data;
+  if (!fallback) await recordFollowUpInteraction(instagramAccountId, userId, job.timestamp);
 
   const isFollowCheck = payload.startsWith("followcheck:");
   if (!isFollowCheck && !payload.startsWith("reveal:")) return;
@@ -1426,28 +1434,7 @@ async function processPostback(job: Job<ProcessPostbackJob>): Promise<void> {
       );
       return;
     }
-    // Optional appreciation follow-up: once the link has been delivered, send a
-    // short thank-you. It is scheduled as its own delayed job so it can go out
-    // some minutes later (followUpDelayMinutes) rather than immediately. The
-    // deterministic job id dedupes repeat button taps to one follow-up per user.
-    if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
-      const delayMs =
-        Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000;
-      await getDMQueue().add(
-        FOLLOWUP_JOB_NAME,
-        {
-          instagramAccountId: automation.instagramAccount.instagramId,
-          accountConnectionId: automation.instagramAccountId,
-          userId,
-          automationId: automation.id,
-          commenterName,
-        },
-        {
-          delay: delayMs,
-          jobId: `followup_${automation.id}_${userId}`,
-        },
-      );
-    }
+    await scheduleFollowUp({ automation, userId, commenterName, sourceKey: `postback:${operationId}` });
     await prisma.dmLog.upsert({
       where: {
         automationId_commentId: {
@@ -1541,6 +1528,8 @@ async function processFollowUp(job: Job<ProcessFollowUpJob>): Promise<void> {
   ) {
     return;
   }
+
+  if (await prisma.sharedFollowUp.findFirst({ where: { workspaceId: automation.workspaceId, isActive: true, archivedAt: null } })) return;
 
   let accessToken: InstagramContext;
   try {
@@ -1724,6 +1713,7 @@ async function processPendingEmailCaptures(job: Job<ProcessMessageJob>): Promise
  */
 async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   const { instagramAccountId, messageId, messageText, senderId } = job.data;
+  await recordFollowUpInteraction(instagramAccountId, senderId, job.timestamp);
 
   // A pending email gate owns the next inbound message. Do not also run the
   // keyword autoresponder, which could disclose the campaign content first.
@@ -1932,25 +1922,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
           context: "message trigger",
         });
 
-        // The link has been delivered, so the appreciation follow-up applies
-        // here exactly as it does after a button tap. Not scheduled behind the
-        // follow prompt — no link went out yet in that branch.
-        if (automation.followUpEnabled && automation.followUpMessage?.trim()) {
-          await getDMQueue().add(
-            FOLLOWUP_JOB_NAME,
-            {
-              instagramAccountId: automation.instagramAccount.instagramId,
-              accountConnectionId: automation.instagramAccountId,
-              userId: senderId,
-              automationId: automation.id,
-              commenterName,
-            },
-            {
-              delay: Math.max(0, automation.followUpDelayMinutes ?? 0) * 60_000,
-              jobId: `followup_${automation.id}_${senderId}`,
-            }
-          );
-        }
+        await scheduleFollowUp({ automation, userId: senderId, commenterName, sourceKey: dedupeId });
       }
 
       await prisma.dmLog.upsert({
@@ -2005,6 +1977,7 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
 }
 
 async function dispatchJob(job: Job<DmQueueJob>): Promise<void> {
+  if (job.name === SHARED_FOLLOWUP_JOB && "deliveryId" in job.data) return processSharedFollowUp(job.data.deliveryId);
   if (job.name === POSTBACK_JOB_NAME) {
     return processPostback(job as Job<ProcessPostbackJob>);
   }

@@ -11,6 +11,7 @@ import { useI18n } from "@/lib/i18n/provider";
 import { usePathname } from "next/navigation";
 
 const pageTitles: Record<string, StaticMessageKey> = {
+  "/follow-ups": "Shared follow-ups",
   "/campaign-templates": "My templates",
   "/campaign-templates/new": "New template",
   "/dashboard": "Dashboard",
