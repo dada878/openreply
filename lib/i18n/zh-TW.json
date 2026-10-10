@@ -575,5 +575,9 @@
   "Retry": "重試",
   "Message": "訊息",
   "Open link": "開啟連結",
-  "Save": "儲存"
+  "Save": "儲存",
+  "Could not load contacts. Please retry.": "無法載入聯絡人，請重試。",
+  "Updating…": "更新中…",
+  "Rows per page": "每頁筆數",
+  "Loading contacts": "正在載入聯絡人"
 }

@@ -1,124 +1,51 @@
-import { NextResponse } from "next/server";
-import { prisma } from "@/lib/db/client";
+import { NextRequest, NextResponse } from "next/server";
 import {
   canManageWorkspace,
   getCurrentWorkspaceContext,
 } from "@/lib/workspace-access";
+import { getContactPage, parseContactQuery } from "@/lib/contacts/query";
+import { contactCsvStream } from "@/lib/contacts/export";
 
 export const dynamic = "force-dynamic";
 
-// Instagram contact identities and captured email addresses are personally
-// identifiable data. Contacts are therefore restricted to workspace owners
-// and admins.
-export async function GET() {
+// Contact identities and email addresses are restricted to owners and admins.
+export async function GET(request: NextRequest) {
   const context = await getCurrentWorkspaceContext();
-  if (!context) {
-    return NextResponse.json({ success: false, error: "Unauthorized" }, { status: 401 });
-  }
-  if (!canManageWorkspace(context.role)) {
+  if (!context)
+    return NextResponse.json(
+      { success: false, error: "Unauthorized" },
+      { status: 401 },
+    );
+  if (!canManageWorkspace(context.role))
     return NextResponse.json(
       { success: false, error: "Only owners and admins can view contacts" },
       { status: 403 },
     );
-  }
-
-  const [captures, sentMessages] = await Promise.all([
-    prisma.emailCapture.findMany({
-      where: {
-        workspaceId: context.workspaceId,
-        capturedAt: { not: null },
-        email: { not: null },
+  const options = parseContactQuery(request.nextUrl.searchParams);
+  if (request.nextUrl.searchParams.get("format") === "csv") {
+    return new Response(
+      contactCsvStream(context.workspaceId, options, request.signal),
+      {
+        headers: {
+          "Content-Type": "text/csv;charset=utf-8",
+          "Content-Disposition":
+            'attachment; filename="openreply-contacts.csv"',
+          "Cache-Control": "no-store",
+        },
       },
-      select: {
-        commenterId: true,
-        commenterName: true,
-        email: true,
-        capturedAt: true,
-        automation: { select: { id: true, name: true } },
-      },
-      orderBy: { capturedAt: "desc" },
-    }),
-    prisma.dmLog.findMany({
-      where: {
-        workspaceId: context.workspaceId,
-        status: "SENT",
-        dmSentAt: { not: null },
-      },
-      select: {
-        commenterId: true,
-        commenterName: true,
-        dmSentAt: true,
-        automation: { select: { id: true, name: true } },
-      },
-      orderBy: { dmSentAt: "desc" },
-    }),
-  ]);
-
-  type Contact = {
-    commenterId: string;
-    commenterName: string | null;
-    email: string | null;
-    lastInteractionAt: Date;
-    campaigns: { id: string; name: string }[];
-  };
-  const contacts = new Map<string, Contact>();
-
-  function addCampaign(contact: Contact, campaign: { id: string; name: string }) {
-    if (!contact.campaigns.some((existing) => existing.id === campaign.id)) {
-      contact.campaigns.push(campaign);
-    }
+    );
   }
-
-  for (const message of sentMessages) {
-    if (!message.dmSentAt) continue;
-    const existing = contacts.get(message.commenterId);
-    if (!existing) {
-      contacts.set(message.commenterId, {
-        commenterId: message.commenterId,
-        commenterName: message.commenterName,
-        email: null,
-        lastInteractionAt: message.dmSentAt,
-        campaigns: [message.automation],
-      });
-      continue;
-    }
-    existing.commenterName ||= message.commenterName;
-    existing.lastInteractionAt =
-      existing.lastInteractionAt > message.dmSentAt
-        ? existing.lastInteractionAt
-        : message.dmSentAt;
-    addCampaign(existing, message.automation);
+  try {
+    const data = await getContactPage(context.workspaceId, options);
+    return NextResponse.json(
+      { success: true, data },
+      { headers: { "Cache-Control": "no-store" } },
+    );
+  } catch (error) {
+    console.error("[Contacts] Failed to load page", error);
+    return NextResponse.json(
+      { success: false, error: "Failed to load contacts" },
+      { status: 500 },
+    );
   }
-
-  for (const capture of captures) {
-    if (!capture.email || !capture.capturedAt) continue;
-    const existing = contacts.get(capture.commenterId);
-    if (!existing) {
-      contacts.set(capture.commenterId, {
-        commenterId: capture.commenterId,
-        commenterName: capture.commenterName,
-        email: capture.email,
-        lastInteractionAt: capture.capturedAt,
-        campaigns: [capture.automation],
-      });
-      continue;
-    }
-    existing.commenterName ||= capture.commenterName;
-    existing.email ||= capture.email;
-    existing.lastInteractionAt =
-      existing.lastInteractionAt > capture.capturedAt
-        ? existing.lastInteractionAt
-        : capture.capturedAt;
-    addCampaign(existing, capture.automation);
-  }
-
-  return NextResponse.json(
-    {
-      success: true,
-      data: [...contacts.values()].sort(
-        (a, b) => b.lastInteractionAt.getTime() - a.lastInteractionAt.getTime(),
-      ),
-    },
-    { headers: { "Cache-Control": "no-store" } },
-  );
 }
