@@ -1,0 +1,2 @@
+ALTER TABLE "Automation"
+ADD COLUMN "dmKeywordMatchMode" TEXT NOT NULL DEFAULT 'CONTAINS';

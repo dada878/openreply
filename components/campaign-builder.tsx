@@ -48,6 +48,7 @@ interface LoadedCampaign {
   keywords: string[];
   matchAnyWord: boolean;
   dmTriggerEnabled: boolean;
+  dmKeywordMatchMode: "EXACT" | "FUZZY" | "CONTAINS";
   wholeWordMatch: boolean;
   dmMessage: string;
   commentDmEnabled: boolean;
@@ -199,6 +200,8 @@ export default function CampaignBuilder({
   const [keywordText, setKeywordText] = useState(initial?.keywords.join(", ") ?? "");
   const [wholeWordMatch, setWholeWordMatch] = useState(initial?.wholeWordMatch ?? true);
   const [dmTriggerEnabled, setDmTriggerEnabled] = useState(initial?.dmTriggerEnabled ?? false);
+  const [dmKeywordMatchMode, setDmKeywordMatchMode] = useState<"EXACT" | "FUZZY" | "CONTAINS">(initial?.dmKeywordMatchMode ?? "CONTAINS");
+  const [dmConflicts, setDmConflicts] = useState<{ id: string; name: string; keywords: string[]; matchMode: string }[]>([]);
   const [commentDmEnabled, setCommentDmEnabled] = useState(initial?.commentDmEnabled ?? true);
 
   const [publicReplyEnabled, setPublicReplyEnabled] = useState(initial?.publicReplyEnabled ?? false);
@@ -267,6 +270,26 @@ export default function CampaignBuilder({
         .filter(Boolean),
     [keywordText]
   );
+  const keywordsKey = keywords.join(",");
+
+  useEffect(() => {
+    if (!dmTriggerEnabled || !selectedAccountId) return;
+    const controller = new AbortController();
+    const params = new URLSearchParams({
+      instagramAccountId: selectedAccountId,
+      keywords: keywordsKey,
+      matchAnyWord: String(matchMode === "any"),
+      matchMode: dmKeywordMatchMode,
+    });
+    if (mode === "edit" && campaignId) params.set("excludeId", campaignId);
+    fetch(`/api/automations/dm-conflicts?${params}`, { signal: controller.signal, cache: "no-store" })
+      .then((response) => response.json())
+      .then((payload) => setDmConflicts(payload.success ? payload.data : []))
+      .catch(() => {
+        if (!controller.signal.aborted) setDmConflicts([]);
+      });
+    return () => controller.abort();
+  }, [campaignId, dmKeywordMatchMode, dmTriggerEnabled, keywordsKey, matchMode, mode, selectedAccountId]);
 
   const trackingPreviewUrl = useMemo(() => {
     if (!trackedDestinationUrl.trim() || trackingParamKeys.length === 0) return null;
@@ -347,6 +370,7 @@ export default function CampaignBuilder({
         setMatchMode(c.matchAnyWord ? "any" : "specific");
         setKeywordText(c.keywords.join(", "));
         setDmTriggerEnabled(c.dmTriggerEnabled ?? false);
+        setDmKeywordMatchMode(c.dmKeywordMatchMode ?? "CONTAINS");
         setCommentDmEnabled(c.commentDmEnabled ?? true);
         setWholeWordMatch(c.wholeWordMatch ?? true);
         setPublicReplyEnabled(c.publicReplyEnabled);
@@ -495,6 +519,7 @@ export default function CampaignBuilder({
       matchAnyWord: matchMode === "any",
       wholeWordMatch,
       dmTriggerEnabled,
+      dmKeywordMatchMode,
       commentDmEnabled,
       dmMessage,
       openingDmEnabled,
@@ -582,6 +607,7 @@ export default function CampaignBuilder({
       matchAnyWord: matchMode === "any",
       keywords: matchMode === "any" ? [] : keywords,
       dmTriggerEnabled,
+      dmKeywordMatchMode,
       wholeWordMatch,
       dmMessage,
       commentDmEnabled,
@@ -978,11 +1004,46 @@ export default function CampaignBuilder({
             />
           </div>
           {dmTriggerEnabled && (
-            <p className="text-xs text-muted">
-              {matchMode === "any"
-                ? t("Every DM to this account gets the reply below — use with care.")
-                : t("A DM containing any of these words gets the same reply, no comment needed.")}
-            </p>
+            <div className="space-y-2">
+              {matchMode === "any" ? (
+                <p className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200">
+                  {t("Any-word mode replies to every DM on this account; matching mode does not narrow it.")}
+                </p>
+              ) : (
+                <>
+                  <label className="block space-y-1 text-xs text-muted">
+                    <span>{t("DM keyword matching")}</span>
+                    <select
+                      value={dmKeywordMatchMode}
+                      onChange={(event) => setDmKeywordMatchMode(event.target.value as typeof dmKeywordMatchMode)}
+                      className="w-full rounded-lg border border-border bg-surface px-3 py-2 text-sm text-foreground focus:border-accent/40 focus:outline-none"
+                    >
+                      <option value="EXACT">{t("Exact match")}</option>
+                      <option value="FUZZY">{t("Fuzzy match (edit distance under 10)")}</option>
+                      <option value="CONTAINS">{t("Contains keyword")}</option>
+                    </select>
+                  </label>
+                  <p className="text-xs text-muted">
+                    {dmKeywordMatchMode === "EXACT"
+                      ? t("The whole DM must match a keyword; outer spaces and letter case are ignored.")
+                      : dmKeywordMatchMode === "FUZZY"
+                        ? t("The whole DM must be fewer than 10 edits from a keyword.")
+                        : t("The DM triggers when it contains any keyword.")}
+                  </p>
+                </>
+              )}
+              {dmConflicts.length > 0 && (
+                <div role="alert" className="rounded-lg border border-amber-500/40 bg-amber-500/10 p-3 text-xs text-amber-900 dark:text-amber-200">
+                  <p className="font-semibold">{t("Potential DM trigger conflict")}</p>
+                  <p className="mt-1">{t("A DM can match more than one active campaign. Only one will reply: exact match takes priority, then fuzzy, then contains; ties use the oldest campaign.")}</p>
+                  <ul className="mt-2 list-disc space-y-1 pl-4">
+                    {dmConflicts.map((conflict) => (
+                      <li key={conflict.id}>{conflict.name} — {conflict.keywords.length ? conflict.keywords.join(", ") : t("any DM")}</li>
+                    ))}
+                  </ul>
+                </div>
+              )}
+            </div>
           )}
           <div className="flex items-center justify-between rounded-lg border border-border px-3 py-2.5">
             <span className="text-sm text-foreground">

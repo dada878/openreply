@@ -26,6 +26,8 @@ interface Campaign {
   matchAnyPost: boolean;
   keywords: string[];
   matchAnyWord: boolean;
+  dmTriggerEnabled: boolean;
+  dmKeywordMatchMode: "EXACT" | "FUZZY" | "CONTAINS";
   dmMessage: string;
   openingDmEnabled: boolean;
   openingDmMessage: string | null;
@@ -226,7 +228,30 @@ export default function CampaignsPage() {
     setSelectedAccountId(accountId);
   }
 
-  function toggleActive(id: string, isActive: boolean) {
+  async function toggleActive(id: string, isActive: boolean) {
+    const campaign = automations.find((item) => item.id === id);
+    if (!isActive && campaign?.dmTriggerEnabled) {
+      const params = new URLSearchParams({
+        instagramAccountId: campaign.instagramAccountId,
+        keywords: campaign.keywords.join(","),
+        matchAnyWord: String(campaign.matchAnyWord),
+        matchMode: campaign.dmKeywordMatchMode ?? "CONTAINS",
+        excludeId: campaign.id,
+      });
+      try {
+        const response = await fetch(`/api/automations/dm-conflicts?${params}`, { cache: "no-store" });
+        const payload = await response.json();
+        if (payload.success && payload.data.length > 0) {
+          const names = payload.data.map((item: { name: string }) => `• ${item.name}`).join("\n");
+          const confirmed = window.confirm(
+            `${t("Potential DM trigger conflict")}\n${names}\n\n${t("Only one campaign will reply to each DM. Continue?")}`,
+          );
+          if (!confirmed) return;
+        }
+      } catch {
+        // Keep activation available if the advisory check is temporarily unavailable.
+      }
+    }
     toggleMutation.mutate({ id, isActive });
   }
 

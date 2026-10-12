@@ -12,6 +12,7 @@ export const templateConfigSchema = z
     keywords: z.array(z.string().trim().min(1).max(50)).max(10),
     matchAnyWord: z.boolean(),
     dmTriggerEnabled: z.boolean(),
+    dmKeywordMatchMode: z.enum(["EXACT", "FUZZY", "CONTAINS"]).optional(),
     // Keep old saved templates compatible; campaigns default to private replies.
     commentDmEnabled: z.boolean().optional(),
     wholeWordMatch: z.boolean(),

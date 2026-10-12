@@ -35,6 +35,7 @@ const createAutomationSchema = z
     keywords: z.array(z.string().min(1).max(50)).max(10).optional().default([]),
     matchAnyWord: z.boolean().optional().default(false),
     dmTriggerEnabled: z.boolean().optional().default(false),
+    dmKeywordMatchMode: z.enum(["EXACT", "FUZZY", "CONTAINS"]).optional().default("CONTAINS"),
     dmMessage: z.string().max(1000).optional().default(""),
     commentDmEnabled: z.boolean().optional().default(true),
     aiPublicReplyEnabled: z.boolean().optional().default(false),
@@ -125,6 +126,7 @@ const updateAutomationSchema = z.object({
   keywords: z.array(z.string().min(1).max(50)).max(10).optional(),
   matchAnyWord: z.boolean().optional(),
   dmTriggerEnabled: z.boolean().optional(),
+  dmKeywordMatchMode: z.enum(["EXACT", "FUZZY", "CONTAINS"]).optional(),
   dmMessage: z.string().max(1000).optional(),
   commentDmEnabled: z.boolean().optional(),
     aiPublicReplyEnabled: z.boolean().optional(),
@@ -444,6 +446,7 @@ export async function POST(request: NextRequest) {
       keywords: matchAnyWord ? [] : parsed.data.keywords,
       matchAnyWord,
       dmTriggerEnabled: parsed.data.dmTriggerEnabled,
+      dmKeywordMatchMode: parsed.data.dmKeywordMatchMode,
       dmMessage: parsed.data.dmMessage,
       commentDmEnabled: parsed.data.commentDmEnabled,
       aiPublicReplyEnabled:

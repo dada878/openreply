@@ -239,6 +239,7 @@ model Automation {
   // keywords above. Independent of the post trigger — a DM has no media, so
   // postId / matchAnyPost do not apply to it.
   dmTriggerEnabled Boolean @default(false)
+  dmKeywordMatchMode String @default("CONTAINS")
   dmMessage      String
   /// Send a private reply for comments that match this campaign. Existing
   /// campaigns keep the historical behavior through the true default.

@@ -59,6 +59,7 @@ import {
   type InstagramContext,
 } from "@/lib/instagram/provider";
 import { matchKeywords } from "@/lib/utils/keyword-matcher";
+import { matchDmKeywords } from "@/lib/utils/dm-keyword-matcher";
 import { reserveDMSlot, releaseDMSlot } from "@/lib/utils/rate-limiter";
 import {
   releaseWorkspaceDMReservation,
@@ -1738,17 +1739,34 @@ async function processMessage(job: Job<ProcessMessageJob>): Promise<void> {
   });
 
   const dedupeId = `dm:${messageId}`;
+  const matching = automations
+    .map((automation) => ({
+      automation,
+      matchResult: automation.matchAnyWord
+        ? { matched: true, matchedKeyword: null }
+        : matchDmKeywords(
+            messageText,
+            automation.keywords,
+            automation.dmKeywordMatchMode as "EXACT" | "FUZZY" | "CONTAINS",
+          ),
+    }))
+    .filter(({ matchResult }) => matchResult.matched)
+    .sort((left, right) => {
+      const rank = (automation: (typeof automations)[number]) =>
+        automation.matchAnyWord
+          ? 3
+          : automation.dmKeywordMatchMode === "EXACT"
+            ? 0
+            : automation.dmKeywordMatchMode === "FUZZY"
+              ? 1
+              : 2;
+      return rank(left.automation) - rank(right.automation);
+    });
 
-  for (const automation of automations) {
-    const matchResult = automation.matchAnyWord
-      ? { matched: true, matchedKeyword: null }
-      : matchKeywords(
-          messageText,
-          automation.keywords,
-          automation.wholeWordMatch
-        );
-
-    if (!matchResult.matched) continue;
+  // A single inbound message belongs to one campaign. Prefer the narrowest
+  // matching rule so a catch-all or broad `AI` campaign cannot duplicate an
+  // exact campaign's reply. Equal ranks retain the oldest campaign first.
+  for (const { automation, matchResult } of matching.slice(0, 1)) {
 
     const existingLog = await prisma.dmLog.findUnique({
       where: {
